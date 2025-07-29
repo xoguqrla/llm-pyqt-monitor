@@ -1,0 +1,47 @@
+{
+  "001_1_data.csv:c017c045fa": {
+    "file_id": "001_1_data.csv:c017c045fa",
+    "path": "C:\\Users\\KAMIC\\Desktop\\001_1_data.csv",
+    "sha256": "c017c045faedd1c3d3a80fa543832416f97333081e7804f6802b82b79f258253",
+    "status": "indexed",
+    "rows": 15161,
+    "cols": 19,
+    "updated_at": 1753770789.2975442
+  },
+  "002_1_data.csv:eedcc34339": {
+    "file_id": "002_1_data.csv:eedcc34339",
+    "path": "C:\\Users\\KAMIC\\Desktop\\002_1_data.csv",
+    "sha256": "eedcc34339f371ddb26206affdba1d968ee410914b47de2e9baf9fd214c3a0f8",
+    "status": "indexed",
+    "rows": 10795,
+    "cols": 19,
+    "updated_at": 1753770791.8621037
+  },
+  "003_1_data.csv:488dd63841": {
+    "file_id": "003_1_data.csv:488dd63841",
+    "path": "C:\\Users\\KAMIC\\Desktop\\003_1_data.csv",
+    "sha256": "488dd63841aab43b20829a3165c71750b51e12618c28768d98b51a1a377ecd36",
+    "status": "indexed",
+    "rows": 1750,
+    "cols": 19,
+    "updated_at": 1753770793.4654567
+  },
+  "004_1_data.csv:a79812a879": {
+    "file_id": "004_1_data.csv:a79812a879",
+    "path": "C:\\Users\\KAMIC\\Desktop\\004_1_data.csv",
+    "sha256": "a79812a879fd2fe823eec816e00f3144074bafe32cbd2c526042ecbfbfd7f1b1",
+    "status": "indexed",
+    "rows": 7154,
+    "cols": 19,
+    "updated_at": 1753770796.0045388
+  },
+  "005_1_data.csv:2916e93f1a": {
+    "file_id": "005_1_data.csv:2916e93f1a",
+    "path": "C:\\Users\\KAMIC\\Desktop\\005_1_data.csv",
+    "sha256": "2916e93f1ae9b8bdecaf63ce7ece05703b41a3dcaaf4501d1641a7d95452a666",
+    "status": "indexed",
+    "rows": 499,
+    "cols": 19,
+    "updated_at": 1753770797.4636962
+  }
+}

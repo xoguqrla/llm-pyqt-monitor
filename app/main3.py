@@ -1,4 +1,4 @@
-﻿# app/main.py
+# app/main3.py
 from __future__ import annotations
 import sys, traceback, html
 from pathlib import Path
@@ -55,8 +55,17 @@ class Worker(QObject):
             self.finished.emit(None, e)
 
 def run_in_thread(parent, fn, cb, *a, **kw):
-    th = QThread(parent); wk = Worker(fn, *a, **kw); wk.moveToThread(th)
-    wk.finished.connect(lambda r, e: (cb(r, e), th.quit(), wk.deleteLater(), th.deleteLater()))
+    th = QThread(parent)
+    wk = Worker(fn, *a, **kw)
+    wk.moveToThread(th)
+    def _done(r, e):
+        try:
+            cb(r, e)
+        finally:
+            th.quit()
+            wk.deleteLater()
+            th.deleteLater()
+    wk.finished.connect(_done)
     th.started.connect(wk.run)
     th.start()
 
@@ -99,9 +108,9 @@ class DropArea(QFrame):
         e.acceptProposedAction()
 
 
-# ───────── Chat bubbles (Agent-only, right aligned) ─────────
+# -------- Chat bubbles (User left / Agent right) --------
 class ChatView(QScrollArea):
-    """에이전트 응답만 오른쪽 말풍선으로 누적 표시"""
+    """유저=왼쪽, 에이전트=오른쪽 말풍선 채팅 뷰"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
@@ -110,37 +119,91 @@ class ChatView(QScrollArea):
 
         self.vbox = QVBoxLayout(self._container)
         self.vbox.setSpacing(8)
-        self.vbox.setContentsMargins(8, 8, 8, 8)
+        self.vbox.setContentsMargins(10, 10, 10, 10)
         self.vbox.addStretch()
 
+        self._user_style = """
+            QFrame {background:#f3f4f6; border-radius:14px; padding:10px 12px;}
+            QLabel {color:#111827; font-size:13px;}
+        """
         self._agent_style = """
-            QFrame {background:#e8f5e9; border-radius:12px; padding:8px 10px;}
+            QFrame {background:#e8f5e9; border-radius:14px; padding:10px 12px;}
             QLabel {color:#0f5132; font-size:13px;}
         """
+        self._note_style = """
+            QFrame {background:#ffffff; border:1px solid #e5e7eb; border-radius:10px; padding:8px 10px;}
+            QLabel {color:#6b7280; font-size:12px;}
+        """
+        self._typing_row = None
 
-    def add_agent(self, text: str):
-        safe = html.escape(text).replace("\n", "<br>")
+    def _make_bubble(self, html_text: str, role: str, ts_text: str):
+        lbl = QLabel(html_text)
+        lbl.setWordWrap(True)
+        lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lbl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
-        label = QLabel(safe)
-        label.setWordWrap(True)
-        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        ts = QLabel(ts_text)
+        ts.setStyleSheet("color:#9ca3af; font-size:11px;")
+        ts.setAlignment(Qt.AlignRight if role == "agent" else Qt.AlignLeft)
 
-        bubble = QFrame()
-        bubble.setStyleSheet(self._agent_style)
-        bl = QHBoxLayout(bubble)
-        bl.setContentsMargins(10, 6, 10, 6)
-        bl.addWidget(label)
+        frame = QFrame()
+        frame.setStyleSheet(
+            self._agent_style if role == "agent" else
+            self._user_style if role == "user" else
+            self._note_style
+        )
+        fl = QVBoxLayout(frame)
+        fl.setContentsMargins(12, 10, 12, 8)
+        fl.setSpacing(6)
+        fl.addWidget(lbl)
+        fl.addWidget(ts)
 
         row = QWidget()
         hl = QHBoxLayout(row)
         hl.setContentsMargins(0, 0, 0, 0)
-        hl.addStretch()          # 왼쪽 여백
-        hl.addWidget(bubble)     # 오른쪽 말풍선
+        if role == "agent":
+            hl.addStretch()
+            hl.addWidget(frame)
+        else:
+            hl.addWidget(frame)
+            hl.addStretch()
+        return row
 
-        # stretch 위에 삽입
+    def _insert_row(self, row: QWidget):
         self.vbox.insertWidget(self.vbox.count() - 1, row)
         self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+
+    def add_user(self, text: str):
+        safe = html.escape(text).replace("\n", "<br>")
+        row = self._make_bubble(safe, role="user", ts_text=self._now())
+        self._insert_row(row)
+
+    def add_agent(self, text: str):
+        safe = html.escape(text).replace("\n", "<br>")
+        row = self._make_bubble(safe, role="agent", ts_text=self._now())
+        self._insert_row(row)
+
+    def add_note(self, text: str):
+        safe = html.escape(text).replace("\n", "<br>")
+        row = self._make_bubble(safe, role="note", ts_text=self._now())
+        self._insert_row(row)
+
+    def show_typing(self, text: str = "답변 작성 중…"):
+        self.hide_typing()
+        safe = html.escape(text)
+        row = self._make_bubble(safe, role="agent", ts_text="")
+        self._insert_row(row)
+        self._typing_row = row
+
+    def hide_typing(self):
+        if self._typing_row:
+            self._typing_row.setParent(None)
+            self._typing_row.deleteLater()
+            self._typing_row = None
+
+    def _now(self) -> str:
+        from datetime import datetime
+        return datetime.now().strftime("%H:%M")
 
 
 # -------- main window --------
@@ -157,7 +220,7 @@ class MainWindow(QWidget):
         s = self.s = get_settings()
         self.engine = make_engine(s.db_url)
         self.llm = build_llm(s.openai_model, s.openai_key, 0)
-        self.sql_chain = build_sql_chain(self.llm, s.db_url)  # core/llm_ops에서 스키마 인스펙트
+        self.sql_chain = build_sql_chain(self.llm, s.db_url)  # core/llm_ops: 실제 스키마 인스펙트
         self.emb = build_embeddings(s.openai_key, s.embed_model)
         self.chroma = build_chroma(self.emb, s.vector_db_dir)
 
@@ -196,7 +259,7 @@ class MainWindow(QWidget):
         center.addWidget(self.chat, 1)
 
         send_row = QHBoxLayout()
-        self.inp = QLineEdit(); self.inp.setPlaceholderText("예) mpt 추세 보여줘 / 이상치 구간 찾아줘 (Enter 전송)")
+        self.inp = QLineEdit(); self.inp.setPlaceholderText("질문을 입력하고 Enter를 눌러 전송…  (예: mpt 시계열 보여줘)")
         self.inp.returnPressed.connect(self.on_ask)
         self.btn_send = QPushButton("▶"); self.btn_send.clicked.connect(self.on_ask)
         self.status = QLabel("")
@@ -213,20 +276,15 @@ class MainWindow(QWidget):
         self.report = QTextEdit(); self.report.setReadOnly(True)
         self.tabs.addTab(self.report, "보고서(Report)")
 
-        # 초기 안내(오른쪽 말풍선)
-        self.append_agent("안녕하세요! 업로드 후 질문을 입력해 주세요. (예: mpt 시계열 추세 보여줘)")
+        # 초기 안내
+        self.chat.add_agent("후 질문을 입력해 주세요. (예: mpt 시계열 추세 보여줘)")
 
-    # ---- chat helper ----
-    def append_agent(self, text: str):
-        self.chat.add_agent(text)
-
-    # ---- window-level dnd fallback ----
+    # ---- window-level DnD fallback ----
     def dragEnterEvent(self, e):
         if any(u.isLocalFile() and u.toLocalFile().lower().endswith(".csv") for u in e.mimeData().urls()):
             e.acceptProposedAction()
         else:
             e.ignore()
-
     def dropEvent(self, e):
         paths = [u.toLocalFile() for u in e.mimeData().urls()
                  if u.isLocalFile() and u.toLocalFile().lower().endswith(".csv")]
@@ -236,7 +294,7 @@ class MainWindow(QWidget):
 
     # ---- status ----
     def set_busy(self, busy: bool):
-        self.btn_send.setEnabled(not busy if False else not busy)  # guard for readability
+        self.btn_send.setEnabled(False if busy else True)
         self.inp.setReadOnly(busy)
         self.status.setText("🤖 답변 생성 중…" if busy else "")
 
@@ -261,7 +319,7 @@ class MainWindow(QWidget):
                 # 2) RAG 업서트
                 entry = upsert_entry(Path(p), rows=meta["rows"], cols=meta["cols"], status="indexed")
                 upsert_texts(self.chroma, entry.file_id, build_embedding_texts_from_meta(meta))
-                self.file_ids[Path(p).name] = entry.file_id  # 저장
+                self.file_ids[Path(p).name] = entry.file_id
 
                 # 3) DB 적재 + 인덱스
                 table = table_name_from_file(Path(p).name)
@@ -270,10 +328,10 @@ class MainWindow(QWidget):
                 # 4) UI
                 self.csv_files.append((Path(p).name, df))
                 it = QListWidgetItem(Path(p).name); it.setCheckState(Qt.Unchecked); self.file_list.addItem(it)
-                self.append_agent(f"✅ 업로드 완료: {Path(p).name} (table={table})")
+                self.chat.add_note(f"✅ 업로드 완료: {Path(p).name} (table={table})")
                 ok += 1
             except Exception as e:
-                self.append_agent(f"❌ 업로드 실패: {p}\n{e}")
+                self.chat.add_note(f"❌ 업로드 실패: {p}\n{e}")
                 fail += 1
 
         prog.setValue(len(paths))
@@ -292,35 +350,31 @@ class MainWindow(QWidget):
 
         for it in items:
             fname = it.text()
-
-            # 1) 메모리/리스트에서 제거
+            # 1) 리스트/메모리에서 제거
             self.csv_files = [(f, df) for f, df in self.csv_files if f != fname]
             self.file_list.takeItem(self.file_list.row(it))
-
-            # 2) DB 테이블 삭제 (업로드와 동일 규칙)
+            # 2) DB 테이블 삭제
             table = table_name_from_file(fname)
             try:
                 with self.engine.begin() as c:
                     c.exec_driver_sql(f'DROP TABLE IF EXISTS "{table}"')
             except Exception as e:
-                self.append_agent(f"⚠️ DB 테이블 삭제 경고: {table} / {e}")
-
-            # 3) Chroma 삭제 (file_id 기반)
+                self.chat.add_note(f"⚠️ DB 테이블 삭제 경고: {table} / {e}")
+            # 3) 벡터 삭제
             fid = self.file_ids.get(fname)
             if fid:
                 ids = [f"{fid}:{i:04d}" for i in range(2000)]
                 try:
-                    # langchain_chroma 래퍼 아래 실제 컬렉션 접근
-                    self.chroma._collection.delete(ids=ids)
+                    self.chroma._collection.delete(ids=ids)  # langchain_chroma 내부 콜렉션
                 except Exception:
                     try:
                         self.chroma.delete(ids=ids)
                     except Exception as e:
-                        self.append_agent(f"⚠️ 임베딩 삭제 경고: {fname} / {e}")
+                        self.chat.add_note(f"⚠️ 임베딩 삭제 경고: {fname} / {e}")
                 self.file_ids.pop(fname, None)
 
         self.update_report_summary()
-        self.append_agent("🗑️ 선택 파일 삭제 완료")
+        self.chat.add_agent("🗑️ 선택 파일 삭제 완료")
 
     # ---- ask ----
     def on_ask(self):
@@ -328,7 +382,8 @@ class MainWindow(QWidget):
         if not q:
             return
         self.inp.clear()
-
+        self.chat.add_user(q)
+        self.chat.show_typing()
         mode = self.mode.currentText()
         tone = self.tone.currentText()
         chosen = route(q) if mode == "Auto" else ("RAG" if mode == "Meta(RAG)" else mode)
@@ -336,23 +391,23 @@ class MainWindow(QWidget):
 
         def _task():
             if chosen == "SQL":
-                sql = generate_sql_from_nlq(self.sql_chain, q)
+                sql = generate_sql_from_nlq(self.sql_chain, q, engine_or_url=self.engine)
                 df = run_sql(self.engine, sql)
-                return ("SQL", df, sql, tone)
+                return ("SQL", df, sql)
 
             if chosen == "RAG":
                 docs = retrieve_meta(self.chroma, q, 6)
                 ans = rag_answer(self.llm, q, docs, tone=tone)
-                return ("RAG", ans, None, tone)
+                return ("RAG", ans, None)
 
             if chosen == "Chat":
                 ans = chat_answer(self.llm, q, tone=tone)
-                return ("CHAT", ans, None, tone)
+                return ("CHAT", ans, None)
 
             # Hybrid
             df, sql = None, ""
             try:
-                sql = generate_sql_from_nlq(self.sql_chain, q)
+                sql = generate_sql_from_nlq(self.sql_chain, q, engine_or_url=self.engine)
                 df = run_sql(self.engine, sql)
                 df_snip = df.head(20).to_csv(index=False)
             except Exception:
@@ -360,29 +415,32 @@ class MainWindow(QWidget):
             docs = retrieve_meta(self.chroma, q, 6)
             meta_snip = "\n\n".join(d.page_content for d in docs[:4])
             final = fuse_sql_and_rag(self.llm, q, df_snip, meta_snip, tone=tone)
-            return ("HYB", (df, sql, final), None, tone)
+            return ("HYB", (df, sql, final), None)
 
         def _done(res, err):
             self.set_busy(False)
+            self.chat.hide_typing()
             if err:
                 QMessageBox.critical(self, "질의 오류", str(err))
+                self.chat.add_agent(f"⚠️ 오류: {err}")
                 return
-            kind, a, b, tone_ = res
+
+            kind, a, b = res  # 항상 3튜플 반환
             if kind == "SQL":
                 df, sql = a, b
                 self.render_all(df, sql)
-                self.append_agent("SQL 결과를 우측 탭에 표시했어요.")
+                self.chat.add_agent("표/그래프/리포트 탭에 SQL 결과를 반영했어요.")
             elif kind == "RAG":
                 self.report.setPlainText(a)
-                self.append_agent("요약을 보고서 탭에 넣어두었어요.")
+                self.chat.add_agent("요약을 보고서 탭에 넣어두었어요.")
             elif kind == "CHAT":
-                self.append_agent(a)
+                self.chat.add_agent(a)
             else:  # HYB
                 df, sql, text = a
                 self.report.setPlainText(text)
                 if df is not None:
                     self.render_all(df, sql)
-                self.append_agent("Hybrid 결과를 반영했어요.")
+                self.chat.add_agent("Hybrid 결과를 반영했어요.")
 
         run_in_thread(self, _task, _done)
 
@@ -405,7 +463,7 @@ class MainWindow(QWidget):
     # ---- render ----
     def render_all(self, df: pd.DataFrame, sql: str | None):
         view = df.head(self.MAX_ROWS_TABLE)
-        step = max(1, len(view)//self.MAX_POINTS_PLOT)
+        step = max(1, len(view) // self.MAX_POINTS_PLOT)
         plot_df = view.iloc[::step] if len(view) > self.MAX_POINTS_PLOT else view
         df_to_table(self.tbl, view)
         plot_df_line(self.ax, self.canvas, plot_df)
