@@ -1,0 +1,9 @@
+﻿.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+Thumbs.db
+.env
+data/uploads/
+data/chroma_openai/
