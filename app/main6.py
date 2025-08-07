@@ -555,4 +555,3 @@ if __name__ == "__main__":
 
 ## scripts/build_metadata.py, scripts/index_metadata.py를 이미 만들어 두셨다면, 업로드 직후 build_for_table() → index_for_sessions()가 자동 실행됩니다(없으면 그냥 건너뜁니다).
 ## 채팅뷰는 최신 메시지가 항상 하단에 표시되도록 QSpacerItem(Expanding) + 레이아웃 이벤트에서 스크롤을 내리는 방식으로 고정했습니다. 드래그 없이 계속 바닥에 붙습니다.
-
