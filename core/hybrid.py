@@ -24,4 +24,3 @@ def fuse_sql_and_rag(llm, question: str, df_csv_snip: str, meta_snip: str, tone:
         f"[메타데이터 요약]\n{meta_snip}\n"
     )
     return llm.invoke(prompt).content
-

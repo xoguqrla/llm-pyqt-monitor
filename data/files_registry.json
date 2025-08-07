@@ -6,7 +6,7 @@
     "status": "indexed",
     "rows": 15161,
     "cols": 19,
-    "updated_at": 1754295744.633229
+    "updated_at": 1754457372.266753
   },
   "002_1_data.csv:eedcc34339": {
     "file_id": "002_1_data.csv:eedcc34339",
@@ -15,7 +15,7 @@
     "status": "indexed",
     "rows": 10795,
     "cols": 19,
-    "updated_at": 1754295747.9245412
+    "updated_at": 1754457380.8489158
   },
   "003_1_data.csv:488dd63841": {
     "file_id": "003_1_data.csv:488dd63841",
@@ -24,7 +24,7 @@
     "status": "indexed",
     "rows": 1750,
     "cols": 19,
-    "updated_at": 1754295750.558632
+    "updated_at": 1754457385.4666612
   },
   "004_1_data.csv:a79812a879": {
     "file_id": "004_1_data.csv:a79812a879",
@@ -33,7 +33,7 @@
     "status": "indexed",
     "rows": 7154,
     "cols": 19,
-    "updated_at": 1754295751.885112
+    "updated_at": 1754457386.9392993
   },
   "005_1_data.csv:2916e93f1a": {
     "file_id": "005_1_data.csv:2916e93f1a",
@@ -87,6 +87,6 @@
     "status": "indexed",
     "rows": 499,
     "cols": 19,
-    "updated_at": 1754295754.1711342
+    "updated_at": 1754457390.509426
   }
 }
