@@ -48,6 +48,30 @@ try:
 except Exception:
     _index_sessions = None
 
+# 1. 로그 파일 저장/불러오기 함수 추가_(A) 파일 경로 상수 선언
+HISTORY_PATH = "history.json"  # 프로젝트 루트에 저장
+
+# (B) 저장 함수
+def save_history(self):
+    """현재 히스토리를 JSON 파일로 저장"""
+    try:
+        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(self.history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[히스토리 저장 오류] {e}")
+        
+# (C) 불러오기 함수
+def load_history(self):
+    """히스토리 파일에서 기록을 불러옴 (없으면 빈 리스트)"""
+    try:
+        with open(HISTORY_PATH, "r", encoding="utf-8") as f:
+            self.history = json.load(f)
+    except FileNotFoundError:
+        self.history = []
+    except Exception as e:
+        print(f"[히스토리 불러오기 오류] {e}")
+        self.history = []
+
 
 # ---------------- global excepthook ----------------
 def _excepthook(et, ev, tb):
@@ -258,6 +282,19 @@ MAX_HISTORY_TURNS = 3  # 최근 3턴만 대화 맥락에 포함
 # ---------------- main window ----------------
 class MainWindow(QWidget):
     MAX_ROWS_TABLE, MAX_POINTS_PLOT = 5000, 5000
+
+
+    # build_prompt 함수 추가
+    def build_prompt(self, question: str) -> str:
+        """최근 N턴 대화와 이번 질문을 포함하는 프롬프트 생성"""
+        context = ""
+        for q, a in self.history[-MAX_HISTORY_TURNS:]:
+            context += f"이전 Q: {q}\n이전 A: {a}\n"
+        prompt = context + f"질문: {question}"
+        return prompt
+
+
+
 
     def __init__(self):
 
@@ -491,9 +528,17 @@ class MainWindow(QWidget):
                     df_snip = ""
             meta_snip = "\n\n".join(getattr(d, "page_content", str(d)) for d in docs[:4])
 
-            # 4) LLM 두 번: (a) 최종답변, (b) 추가확인
-            final_text  = llm_final_only(self.llm, q, df_snip, meta_snip, tone)
-            checks_list = llm_checks_only(self.llm, q, df_snip, meta_snip)
+            # # 4) LLM 두 번: (a) 최종답변, (b) 추가확인
+            # final_text  = llm_final_only(self.llm, q, df_snip, meta_snip, tone)
+            # checks_list = llm_checks_only(self.llm, q, df_snip, meta_snip)
+#----------------------------------------------------------------------------------------
+            # 즉, q(질문)를 바로 넘기지 말고, 항상 self.build_prompt(q)의 결과를 넘겨라!
+            # 그렇게 바꾼 코드임.
+            prompt = self.build_prompt(q)
+            final_text  = llm_final_only(self.llm, prompt, df_snip, meta_snip, tone)
+            checks_list = llm_checks_only(self.llm, prompt, df_snip, meta_snip)
+
+
 
             # 5) 근거(Evidence) 텍스트 구성
             ev_lines = ["## 사용 근거"]
@@ -512,17 +557,25 @@ class MainWindow(QWidget):
                 ev_lines += ["", "### SQL 생성/실행 참고", err_sql]
 
             evidence_text = "\n".join(ev_lines)
-            return (final_text, df, sql, evidence_text)
+            return (q, final_text, df, sql, evidence_text)
 
         def _done(res, err):
             self.set_busy(False)
             if err:
                 QMessageBox.critical(self, "질의 오류", str(err))
                 return
-            final_text, df, sql, evidence_text = res
+            q, final_text, df, sql, evidence_text = res
 
             # 채팅: 최종 답변만
             self.chat.add_bot(final_text)
+
+
+            # -------- #
+            # 여기에 히스토리 append 추가함. --> (추후 로그 저장 등도 이 위치에서 처리)
+            self.history.append((q, final_text))
+            # → 이 부분은 "질문-답변 쌍을 대화 기록(history)에 추가"하라는 의미야.
+            # -------- #
+
 
             # 표/그래프: df 있을 때만
             if isinstance(df, pd.DataFrame):

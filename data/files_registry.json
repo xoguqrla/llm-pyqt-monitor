@@ -88,5 +88,14 @@
     "rows": 499,
     "cols": 19,
     "updated_at": 1754615195.258222
+  },
+  "merged_data.csv:c4cb178442": {
+    "file_id": "merged_data.csv:c4cb178442",
+    "path": "Z:\\KAMIC\\01.KAMIC_장비\\32. Laser-Wire DED\\21. 모니터링데이터\\DB\\20250221_Jisu_recorn_cont\\merged_data.csv",
+    "sha256": "c4cb17844225d0fd7d48417d93583d4b985ce7fc0bebd9dbd46777f7b142f86a",
+    "status": "indexed",
+    "rows": 2596,
+    "cols": 22,
+    "updated_at": 1754981359.177712
   }
 }
