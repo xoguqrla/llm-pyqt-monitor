@@ -244,10 +244,11 @@ class MainWindow(QWidget):
         super().__init__()
         self.history: List[Tuple[str, str]] = []
         
-        # <<<< 핵심 수정: 모든 시뮬레이션 변수를 여기서 확실하게 초기화 >>>>
+        # <<<< 핵심 수정: 시뮬레이터 상태 변수 일원화 및 정밀 타이머 >>>>
         self.simulation_timer = QTimer(self)
+        self.simulation_timer.setTimerType(Qt.PreciseTimer)
         self.simulation_timer.timeout.connect(self._update_simulation_frame)
-        self.sim_data, self.sim_points, self.sim_head_actor, self.sim_bead_actor = None, None, None, None
+        self.sim_handles = None
         self.sim_frame_index = 0
         
         self.setupUi()
@@ -523,10 +524,6 @@ class MainWindow(QWidget):
         plot_df_line(self.ax, self.canvas, plot_df)
         self.last_df = df
     
-    def _stop_simulation_if_running(self):
-        if self.simulation_timer.isActive():
-            self.simulation_timer.stop()
-
     def load_csv_for_viz(self):
         self._stop_simulation_if_running()
         self.sim_controls_widget.hide()
@@ -612,8 +609,10 @@ class MainWindow(QWidget):
             self.simulation_timer.stop()
             self.btn_toggle_playback.setText("▶ 재생")
         else:
-            if self.sim_data is not None and self.sim_frame_index >= len(self.sim_data):
+            # 재생 전, 프레임이 끝까지 갔으면 처음부터
+            if self.sim_handles is not None and self.sim_frame_index >= len(self.sim_handles["sim_df"]):
                 self.reset_simulation()
+            # 실제 간격은 _update_simulation_frame에서 다음 간격으로 동기화
             self.simulation_timer.start(0)
             self.btn_toggle_playback.setText("⏸ 일시정지")
 
@@ -626,7 +625,7 @@ class MainWindow(QWidget):
             self._update_simulation_frame()
     
     def _update_simulation_frame(self):
-        if not self.sim_handles or self.sim_frame_index >= len(self.sim_handles["sim_df"]):
+        if (not self.sim_handles) or (self.sim_frame_index >= len(self.sim_handles["sim_df"])):
             self._stop_simulation_if_running(); return
 
         sim_df = self.sim_handles["sim_df"]
