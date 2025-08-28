@@ -395,6 +395,13 @@ class MainWindow(QWidget):
         super().__init__()
         self.history: List[Tuple[str, str]] = []
 
+        # Deep report state and current DataFrame for visualizations
+        self.in_deep_report: bool = False
+        self.deep_report_inputs: List[str] = []
+        self.current_df: pd.DataFrame | None = None
+        # For deep report: allow multiple datasets to be loaded
+        self.current_dfs: List[Tuple[pd.DataFrame, str]] = []
+
         # 시뮬 상태/타이머
         self.simulation_timer = QTimer(self)
         self.simulation_timer.setTimerType(Qt.PreciseTimer)
@@ -437,6 +444,9 @@ class MainWindow(QWidget):
         self.csv_files, self.file_ids = [], {}
         self.last_df, self.df_viz = None, None
         self.visualizer, self.viz_context = None, None
+
+        # Flag to track whether an advanced visualization was shown for a query
+        self._advanced_triggered = False
 
     # app/main10_pdf_rag.py 파일에서 이 함수를 찾아 통째로 교체하세요.
 
@@ -514,14 +524,71 @@ class MainWindow(QWidget):
 
         # ============== 우측: 결과 ==============
         right.addWidget(QLabel("📊 LLM 결과/리포트"))
+        # 결과/리포트 탭 영역
         self.tabs = QTabWidget(); right.addWidget(self.tabs, 1)
-        self.tbl = QTableWidget(); self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); self.tabs.addTab(self.tbl, "표(Table)")
-        self.fig, self.ax = plt.subplots(); self.canvas = FigureCanvas(self.fig); self.tabs.addTab(self.canvas, "그래프(Chart)")
-        self.evidence = QTextEdit(); self.evidence.setReadOnly(True); self.tabs.addTab(self.evidence, "근거(Evidence)")
-        self.report = QTextEdit(); self.report.setReadOnly(True); self.tabs.addTab(self.report, "보고서(Report)")
+        # (1) 표: SQL 결과를 보여주는 테이블
+        self.tbl = QTableWidget()
+        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tabs.addTab(self.tbl, "표(Table)")
+        # (2) 기본 차트: SQL 결과를 간단한 라인 차트로 표시
+        self.fig, self.ax = plt.subplots()
+        self.canvas = FigureCanvas(self.fig)
+        self.tabs.addTab(self.canvas, "그래프(Chart)")
+        # (3) Evidence: SQL 및 RAG 근거, 프리뷰 출력
+        self.evidence = QTextEdit()
+        self.evidence.setReadOnly(True)
+        self.tabs.addTab(self.evidence, "근거(Evidence)")
+        # (4) 보고서: 기본 보고서 + 심층 리포트 요청 버튼을 포함하는 탭
+        #    생성 시 보고서를 포함할 위젯과 레이아웃을 구성
+        self.report_tab = QWidget()
+        report_layout = QVBoxLayout(self.report_tab)
+        # 심층 리포트 요청 버튼
+        self.btn_deep_report = QPushButton("심층 리포트 요청")
+        self.btn_deep_report.clicked.connect(self.start_deep_report)
+        report_layout.addWidget(self.btn_deep_report)
+        # 실제 보고서 텍스트 영역
+        self.report = QTextEdit()
+        self.report.setReadOnly(True)
+        report_layout.addWidget(self.report)
+        self.tabs.addTab(self.report_tab, "보고서(Report)")
+        # (5) 고급 시각화: 2페이지의 분석 결과를 1페이지에서도 볼 수 있도록 하는 탭
+        self.adv_fig = plt.figure()
+        self.adv_canvas = FigureCanvas(self.adv_fig)
+        self.adv_tab_index = self.tabs.addTab(self.adv_canvas, "시각화 결과")
+
+        # (6) 전문가 코멘트: 도메인 지식 메모장 탭
+        self.expert_tab = QWidget()
+        expert_layout = QVBoxLayout(self.expert_tab)
+        # 입력 영역 (여러 줄)
+        self.expert_input = QTextEdit()
+        self.expert_input.setPlaceholderText("전문가의 코멘트를 입력하세요...")
+        expert_layout.addWidget(self.expert_input)
+        # 저장 버튼
+        self.btn_save_expert = QPushButton("저장")
+        self.btn_save_expert.clicked.connect(self.on_save_expert_comment)
+        expert_layout.addWidget(self.btn_save_expert)
+        # 스크롤 영역 내 컨테이너 (저장된 코멘트를 나열)
+        self.expert_scroll = QScrollArea()
+        self.expert_scroll.setWidgetResizable(True)
+        self.expert_container = QWidget()
+        self.expert_container_layout = QVBoxLayout(self.expert_container)
+        self.expert_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.expert_container_layout.setSpacing(4)
+        self.expert_scroll.setWidget(self.expert_container)
+        expert_layout.addWidget(self.expert_scroll, 1)
+        # 탭 추가
+        self.expert_tab_index = self.tabs.addTab(self.expert_tab, "전문가 코멘트")
+        # Populate expert comments from DB
+        QTimer.singleShot(0, self.load_expert_comments)
 
         # 시작 시 저장된 CSV 목록 채우기
-        QTimer.singleShot(0, self.refresh_csv_saved_list) 
+        QTimer.singleShot(0, self.refresh_csv_saved_list)
+
+        # 더블클릭으로 저장된 CSV 로딩 기능 연결
+        try:
+            self.csv_saved_list.itemDoubleClicked.connect(self.on_load_saved_csv)
+        except Exception:
+            pass
 
     def setup_viz_tab(self):
         layout = QVBoxLayout(self.viz_tab)
@@ -777,12 +844,64 @@ class MainWindow(QWidget):
         self.images_dir = Path(self.s.vector_db_dir) / "doc_images"
         self.images_dir.mkdir(parents=True, exist_ok=True)
 
+        # 전문가 코멘트 테이블 보장
+        try:
+            with self.engine.begin() as c:
+                dialect = getattr(self.engine, "dialect", None)
+                if dialect and getattr(dialect, "name", "").lower() == "postgresql":
+                    # PostgreSQL용: SERIAL 사용
+                    ddl = """
+        CREATE TABLE IF NOT EXISTS expert_comments (
+            id SERIAL PRIMARY KEY,
+            content TEXT NOT NULL,
+            created_at TEXT
+        )
+        """
+                else:
+                    # SQLite 등 AUTOINCREMENT를 지원하는 DB용
+                    ddl = """
+        CREATE TABLE IF NOT EXISTS expert_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL,
+            created_at TEXT
+        )
+        """
+                c.exec_driver_sql(ddl)
+        except Exception as e:
+            print(f"[expert_comments table init error] {e}")
+
+
     # LLM 보조
     def build_prompt(self, question: str) -> str:
         full_question = question
+        # Include visualization context if present
         if self.viz_context:
             full_question = f"[Current Analysis Context]\n{self.viz_context}\n\n[User's Question]\n{question}"
             self.viz_context = None
+        # If there are any selected CSV files, prepend their names to the question context
+        try:
+            selected = self.get_selected_filenames()
+        except Exception:
+            selected = []
+        if selected:
+            try:
+                summary = self.get_selected_files_summary()
+            except Exception:
+                summary = ""
+            # Attach summary and list of selected filenames
+            selected_context = "[선택된 데이터 파일 요약]\n" + summary + "\n\n"
+            full_question = selected_context + full_question
+        # Include expert comments from DB as domain knowledge
+        try:
+            with self.engine.begin() as c:
+                rows = c.exec_driver_sql("SELECT content FROM expert_comments").fetchall()
+                exp_comments = [r[0] for r in rows]
+        except Exception:
+            exp_comments = []
+        if exp_comments:
+            comments_str = "\n\n".join(exp_comments)
+            expert_context = "[전문가 코멘트]\n" + comments_str + "\n\n"
+            full_question = expert_context + full_question
         context = "".join(f"이전 Q: {q}\n이전 A: {a}\n" for q, a in self.history[-MAX_HISTORY_TURNS:])
         return context + f"질문: {full_question}"
 
@@ -879,18 +998,47 @@ class MainWindow(QWidget):
         except: pass
 
         def _task(file_paths, progress_callback, cancel_event):
+            """
+            Ingest CSV files and compute basic statistics/preview for each.
+
+            Returns (ok, fail, results) where results contains tuples:
+            (filename, rows, cols, missing_total, desc_str, preview_str, df)
+            for each successfully processed file. These additional values
+            enable later rendering of summary and preview in the UI.
+            """
             ok, fail, results = 0, [], []
             for i, p_str in enumerate(file_paths, 1):
-                if cancel_event.is_set(): break
+                if cancel_event.is_set():
+                    break
                 path = Path(p_str)
                 progress_callback(i - 1, f"{path.name} 처리 중...")
                 try:
+                    # Load CSV and metadata
                     df, meta, _ = load_and_meta(path, self.s.meta_json_dir)
+                    # Register file into registry
                     entry = upsert_entry(path, rows=meta["rows"], cols=meta["cols"], status="indexed")
+                    # Insert embeddings per column
                     upsert_texts(self.chroma, entry.file_id, build_embedding_texts_from_meta(meta))
+                    # Ingest into SQL table
                     table = table_name_from_file(path.name)
-                    ingest_df(self.engine, df, table); ensure_indexes(self.engine, table)
-                    results.append((path.name, meta["rows"], meta["cols"]))
+                    ingest_df(self.engine, df, table)
+                    ensure_indexes(self.engine, table)
+                    # Compute statistics
+                    try:
+                        missing_total = int(df.isna().sum().sum())
+                    except Exception:
+                        missing_total = 0
+                    try:
+                        desc_df = df.describe(include="all")
+                        desc_str = desc_df.to_string(max_cols=6, max_rows=10)
+                    except Exception:
+                        desc_str = ""
+                    try:
+                        preview_df = df.head(20)
+                        preview_str = preview_df.to_string(index=False)
+                    except Exception:
+                        preview_str = ""
+                    results.append((path.name, meta["rows"], meta["cols"], missing_total, desc_str, preview_str, df))
                     ok += 1
                 except Exception as e:
                     fail.append(f"{path.name}: {e}")
@@ -898,22 +1046,73 @@ class MainWindow(QWidget):
 
         def _done(res, err):
             prog.close()
-            if err: return QMessageBox.critical(self, "CSV 처리 오류", str(err))
+            if err:
+                return QMessageBox.critical(self, "CSV 처리 오류", str(err))
             ok, fail, results = res
-
-            for name, rows, cols in results:
+            last_df = None
+            # Populate UI for new files and append summaries
+            for (name, rows, cols, missing_total, desc_str, preview_str, df) in results:
+                # Add to new files list
                 it = QListWidgetItem(f"{name} ({rows}x{cols})")
                 it.setData(Qt.UserRole, name)
                 it.setCheckState(Qt.Unchecked)
                 self.csv_new_list.addItem(it)
+                # Notify via chat
                 self.chat.add_bot(f"✅ 업로드 완료: {name}")
-
-            self.refresh_csv_saved_list() # 저장된 목록 갱신
-            self.update_report_summary()  # 리포트 탭 갱신
-
-            summary = f"성공: {ok}건"
-            if fail: summary += f"\n실패: {len(fail)}건\n" + "\n".join(fail)
-            QMessageBox.information(self, "CSV 처리 완료", summary)
+                # Build summary text
+                summary_text = (
+                    f"[파일] {name}\n"
+                    f"- 행 수: {rows}\n"
+                    f"- 열 수: {cols}\n"
+                    f"- 결측치 총합: {missing_total}\n"
+                )
+                if desc_str:
+                    summary_text += f"\n[통계 요약]\n{desc_str}\n"
+                if preview_str:
+                    summary_text += f"\n[미리보기]\n{preview_str}\n"
+                try:
+                    # Append to report tab
+                    self.report.append(summary_text)
+                except Exception:
+                    current_text = self.report.toPlainText()
+                    self.report.setPlainText(current_text + "\n" + summary_text)
+                last_df = df
+            # Refresh saved list
+            self.refresh_csv_saved_list()
+            # Set current dataset and visualizer to the last successfully uploaded file
+            if last_df is not None:
+                try:
+                    self.current_df = last_df
+                    self.df_viz = last_df
+                    self.visualizer = AnalysisVisualizer(last_df)
+                except Exception:
+                    self.visualizer = None
+                # Update viz tab UI similar to on_load_saved_csv
+                try:
+                    self._stop_simulation_if_running()
+                    self.sim_controls_widget.hide()
+                    self.viz_stack.setCurrentIndex(0)
+                    self.viz_fig.clear()
+                    ax = self.viz_fig.add_subplot(111)
+                    ax.text(0.5, 0.5, f"'{results[-1][0]}' loaded.\nPlease select an analysis.", ha='center', va='center')
+                    ax.axis('off')
+                    self.viz_canvas.draw()
+                    for btn in [self.btn_run_stability, self.btn_run_correlation, self.btn_run_3d_path,
+                                self.btn_run_simulation, self.btn_run_integrated, self.btn_run_aw_volume]:
+                        btn.setEnabled(True)
+                    self.btn_ask_llm_about_viz.setEnabled(False)
+                except Exception:
+                    pass
+                # Render preview of last uploaded file in table/chart tabs
+                try:
+                    self.render_all(last_df, sql=None)
+                except Exception:
+                    pass
+            # Summary message
+            summary_msg = f"성공: {ok}건"
+            if fail:
+                summary_msg += f"\n실패: {len(fail)}건\n" + "\n".join(fail)
+            QMessageBox.information(self, "CSV 처리 완료", summary_msg)
 
         worker, thread = run_in_thread(self, _task, _done, paths, progress_callback=None, cancel_event=cancel_event)
         worker.progress.connect(lambda i, msg: (prog.setValue(i), prog.setLabelText(msg)))
@@ -1032,8 +1231,26 @@ class MainWindow(QWidget):
         q = self.inp.text().strip()
         if not q:
             return
-        self.inp.clear(); self.chat.add_user(q)
-        tone = self.tone.currentText(); self.set_busy(True)
+        # Clear input and echo user input in chat
+        self.inp.clear()
+        self.chat.add_user(q)
+        # Reset advanced visualization flag for this query
+        self._advanced_triggered = False
+        # Deep report mode handling: accumulate user inputs until '끝' or '완료'
+        if self.in_deep_report:
+            # Check for termination keywords
+            kw = q.strip().lower()
+            if kw in ["끝", "완료", "finish", "done"]:
+                # Generate the report and exit deep report mode
+                self.generate_deep_report()
+            else:
+                # Append to context and prompt for more input
+                self.deep_report_inputs.append(q)
+                self.chat.add_bot("계속 입력해주세요. 보고서를 완료하려면 '끝' 또는 '완료'라고 입력하세요.")
+            return
+        # Normal LLM processing
+        tone = self.tone.currentText()
+        self.set_busy(True)
 
         def _task():
             sql, df, err_sql = "", None, ""
@@ -1054,15 +1271,34 @@ class MainWindow(QWidget):
             final_text = llm_final_only(self.llm, prompt_for_llm, df_snip, meta_snip, tone)
             checks_list = llm_checks_only(self.llm, prompt_for_llm, df_snip, meta_snip)
 
+            # Build evidence lines
             ev_lines = ["## 사용 근거"]
-            if sql: ev_lines += ["### 사용 SQL", "```sql", sql.strip(), "```"]
-            if isinstance(df, pd.DataFrame): ev_lines += ["### SQL 결과 개요", f"- 행 수: {len(df)}", f"- 열 수: {df.shape[1]}"]
+            if sql:
+                ev_lines += ["### 사용 SQL", "```sql", sql.strip(), "```"]
+            # Include basic info about SQL result
+            if isinstance(df, pd.DataFrame):
+                ev_lines += [
+                    "### SQL 결과 개요",
+                    f"- 행 수: {len(df)}",
+                    f"- 열 수: {df.shape[1]}"
+                ]
+                # Append preview of the first 10 rows
+                try:
+                    preview = df.head(10).to_string(index=False)
+                    ev_lines += ["", "### SQL 결과 미리보기", preview]
+                except Exception:
+                    pass
+            # Include RAG evidence snippet
             if docs:
                 ev_lines.append("### RAG 근거(상위 문서 첫 줄)")
                 for i, d in enumerate(docs[:5], 1):
                     ev_lines.append(f"{i}. {getattr(d, 'page_content', str(d)).splitlines()[0][:200]}")
-            if checks_list: ev_lines += ["", "## 추가 확인 항목", checks_list]
-            if err_sql and not sql: ev_lines += ["", "### SQL 생성/실행 참고", err_sql]
+            # Additional checks list
+            if checks_list:
+                ev_lines += ["", "## 추가 확인 항목", checks_list]
+            # SQL generation/ execution errors
+            if err_sql and not sql:
+                ev_lines += ["", "### SQL 생성/실행 참고", err_sql]
             return (q, final_text, df, sql, "\n".join(ev_lines))
 
         def _done(res, err):
@@ -1070,11 +1306,58 @@ class MainWindow(QWidget):
             if err:
                 return QMessageBox.critical(self, "질의 오류", str(err))
             q, final_text, df, sql, evidence_text = res
+            # Display chatbot response
             self.chat.add_bot(final_text)
-            self.history.append((q, final_text)); self.save_history()
+            # Save history
+            self.history.append((q, final_text))
+            self.save_history()
+            # Render table and chart for SQL result (if any)
             if isinstance(df, pd.DataFrame):
-                self.render_all(df, sql)
+                try:
+                    self.render_all(df, sql)
+                except Exception:
+                    pass
+            # Always display evidence text
             self.evidence.setPlainText(evidence_text)
+            # Determine visualization trigger keywords
+            try:
+                query_lower = q.lower()
+            except Exception:
+                query_lower = q
+            # Trigger appropriate visualization on the LLM page
+            if any(k in query_lower for k in ["상관관계", "correlation"]):
+                # Show correlation dashboard in advanced tab
+                self.show_visualization('correlation')
+            elif any(k in query_lower for k in ["3d", "경로", "path"]):
+                # Show 3D path visualization in advanced tab
+                self.show_visualization('3d')
+            elif any(k in query_lower for k in ["시뮬레이션", "simulation"]):
+                # Notify that simulation is only available in the viz tab
+                self.show_visualization('simulation')
+            elif any(k in query_lower for k in ["a*w", "aw"]):
+                # Notify that AW dashboard is only available in the viz tab
+                self.show_visualization('aw')
+            elif ("mpt" in query_lower or "m.p.t" in query_lower) and any(k in query_lower for k in ["시간", "time"]):
+                # Plot MPT vs Time if both keywords present
+                self.show_visualization('mpt_time')
+            # If no advanced visualization was triggered, select the most appropriate results tab
+            if not self._advanced_triggered:
+                # Prefer table view if a DataFrame result exists
+                if isinstance(df, pd.DataFrame):
+                    idx = self.tabs.indexOf(self.tbl)
+                    if idx >= 0:
+                        self.tabs.setCurrentIndex(idx)
+                else:
+                    # Otherwise show evidence tab
+                    idx = self.tabs.indexOf(self.evidence)
+                    if idx >= 0:
+                        self.tabs.setCurrentIndex(idx)
+            # Ensure we stay on the LLM tab (index 0 of the main tab widget)
+            try:
+                if self.tab_widget.currentIndex() != 0:
+                    self.tab_widget.setCurrentIndex(0)
+            except Exception:
+                pass
 
         run_in_thread(self, _task, _done)
 
@@ -1626,6 +1909,563 @@ class MainWindow(QWidget):
             self.inp.setText("이 분석 결과가 의미하는 바를 해석하고, 공정 개선을 위한 제안 3가지를 해줘.")
             self.inp.setFocus()
 
+    # ------------------------------------------------------------------
+    # 전문가 코멘트 관리 메서드들
+    def load_expert_comments(self):
+        """
+        Load expert comments from the database and populate the expert comments tab.
+        Each comment will be displayed with a delete (X) button.
+        """
+        # Clear existing UI items
+        layout = self.expert_container_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        # Fetch comments from DB
+        comments = []
+        try:
+            with self.engine.begin() as c:
+                rows = c.exec_driver_sql("SELECT id, content FROM expert_comments ORDER BY id").fetchall()
+                comments = [(int(r[0]), r[1]) for r in rows]
+        except Exception as e:
+            print(f"[load_expert_comments error] {e}")
+        # Populate UI
+        for cid, text in comments:
+            fr = QFrame()
+            fr.setFrameShape(QFrame.StyledPanel)
+            h_layout = QHBoxLayout(fr)
+            h_layout.setContentsMargins(4, 4, 4, 4)
+            lab = QLabel(text)
+            lab.setWordWrap(True)
+            h_layout.addWidget(lab, 1)
+            btn_del = QPushButton("✕")
+            btn_del.setFixedWidth(24)
+            btn_del.setStyleSheet("color: red; font-weight: bold;")
+            # Use lambda to capture comment id
+            btn_del.clicked.connect(lambda _, cid=cid: self.on_delete_expert_comment(cid))
+            h_layout.addWidget(btn_del)
+            layout.addWidget(fr)
+        # Add stretch to push items to top
+        layout.addStretch(1)
+
+    def on_save_expert_comment(self):
+        """
+        Save the content of expert_input to the database as a new expert comment,
+        if it is not empty.
+        """
+        content = self.expert_input.toPlainText().strip()
+        if not content:
+            QMessageBox.information(self, "입력 필요", "코멘트를 입력한 뒤 저장하세요.")
+            return
+        try:
+            from datetime import datetime
+            now = datetime.utcnow().isoformat()
+        except Exception:
+            now = None
+        try:
+            with self.engine.begin() as c:
+                # psycopg2 (PostgreSQL) doesn't accept ':' parameters; choose param style based on dialect
+                dialect = getattr(self.engine, "dialect", None)
+                # Default to SQLite/qmark style
+                if dialect and getattr(dialect, "name", "").lower() == "postgresql":
+                    # Use Postgres pyformat (positional) placeholders
+                    stmt = "INSERT INTO expert_comments (content, created_at) VALUES (%s, %s)"
+                    params = (content, now)
+                else:
+                    # Use qmark style placeholders (e.g. SQLite)
+                    stmt = "INSERT INTO expert_comments (content, created_at) VALUES (?, ?)"
+                    params = (content, now)
+                c.exec_driver_sql(stmt, params)
+            # Clear input after saving
+            self.expert_input.clear()
+            # Refresh list
+            self.load_expert_comments()
+            QMessageBox.information(self, "저장", "코멘트가 저장되었습니다.")
+        except Exception as e:
+            QMessageBox.warning(self, "저장 실패", f"코멘트를 저장할 수 없습니다: {e}")
+
+    def on_delete_expert_comment(self, comment_id: int):
+        """
+        Delete an expert comment from the database and update the UI.
+        """
+        # Confirm deletion
+        resp = QMessageBox.question(
+            self, "삭제 확인", "정말 이 코멘트를 삭제하시겠습니까?", QMessageBox.Yes | QMessageBox.No
+        )
+        if resp != QMessageBox.Yes:
+            return
+        try:
+            with self.engine.begin() as c:
+                dialect = getattr(self.engine, "dialect", None)
+                # Build deletion statement based on DB dialect
+                if dialect and getattr(dialect, "name", "").lower() == "postgresql":
+                    stmt = "DELETE FROM expert_comments WHERE id = %s"
+                    params = (comment_id,)
+                else:
+                    stmt = "DELETE FROM expert_comments WHERE id = ?"
+                    params = (comment_id,)
+                c.exec_driver_sql(stmt, params)
+            # Refresh list
+            self.load_expert_comments()
+        except Exception as e:
+            QMessageBox.warning(self, "삭제 실패", f"코멘트를 삭제할 수 없습니다: {e}")
+
+    # ------------------------------------------------------------------
+    # 선택된 CSV 파일 명단을 반환
+    def get_selected_filenames(self) -> List[str]:
+        """Return the list of filenames that are checked in the CSV lists."""
+        names: List[str] = []
+        # Newly added files
+        for i in range(self.csv_new_list.count() if hasattr(self, 'csv_new_list') else 0):
+            it = self.csv_new_list.item(i)
+            try:
+                if it and it.checkState() == Qt.Checked:
+                    names.append(it.data(Qt.UserRole) or it.text().split(' ')[0])
+            except Exception:
+                continue
+        # Saved files
+        for i in range(self.csv_saved_list.count() if hasattr(self, 'csv_saved_list') else 0):
+            it = self.csv_saved_list.item(i)
+            try:
+                if it and it.checkState() == Qt.Checked:
+                    names.append(it.data(Qt.UserRole) or it.text().split(' ')[0])
+            except Exception:
+                continue
+        return names
+
+    def get_selected_files_summary(self) -> str:
+        """
+        Build a human-readable summary of the selected CSV files using their
+        metadata (rows and columns) from the registry. If registry data is
+        unavailable, uses a placeholder.
+        """
+        names = self.get_selected_filenames()
+        if not names:
+            return ""
+        summary_lines: List[str] = []
+        try:
+            entries = load_registry()
+        except Exception:
+            entries = {}
+        for fname in names:
+            file_id = self.file_ids.get(fname)
+            rows = cols = None
+            if file_id and entries:
+                data = entries.get(file_id)
+                if data:
+                    rows = data.get("rows")
+                    cols = data.get("cols")
+            if rows is not None and cols is not None:
+                summary_lines.append(f"- {fname}: {rows}행 × {cols}열")
+            else:
+                summary_lines.append(f"- {fname}: (요약 정보 없음)")
+        return "\n".join(summary_lines)
+
+    # ------------------------------------------------------------------
+    # 새로운 기능: 저장된 CSV 더블클릭으로 로딩
+    def on_load_saved_csv(self, item):
+        """
+        Load a saved CSV from the registry into the visualizer and set it
+        as the current dataset for advanced visualizations and analysis.
+        """
+        try:
+            fname = item.data(Qt.UserRole) or item.text().split()[0]
+        except Exception:
+            fname = item.text() if item else None
+        if not fname:
+            return
+        # Determine file path from registry
+        path_str = None
+        file_id = self.file_ids.get(fname)
+        if file_id:
+            try:
+                entries = load_registry()
+                entry = entries.get(file_id)
+                if entry and entry.get("path"):
+                    path_str = entry["path"]
+            except Exception as e:
+                print(f"[on_load_saved_csv] registry read error: {e}")
+        # Attempt to load CSV from file system
+        df = None
+        if path_str and os.path.exists(path_str):
+            try:
+                # Use load_and_meta to keep consistency with uploads (column renaming etc.)
+                df, meta, _ = load_and_meta(Path(path_str), self.s.meta_json_dir)
+            except Exception:
+                try:
+                    df = pd.read_csv(path_str)
+                except Exception as e:
+                    print(f"[on_load_saved_csv] CSV load error: {e}")
+                    df = None
+        # Fallback: read from SQL table
+        if df is None:
+            table = table_name_from_file(fname)
+            try:
+                df = run_sql(self.engine, f'SELECT * FROM "{table}"')
+            except Exception as e:
+                print(f"[on_load_saved_csv] DB load error: {e}")
+                df = None
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            QMessageBox.information(self, "로드 실패", f"{fname}을(를) 불러올 수 없습니다.")
+            return
+        # Set current dataset and visualizer
+        self.current_df = df
+        try:
+            self.visualizer = AnalysisVisualizer(df)
+        except Exception as e:
+            print(f"[on_load_saved_csv] visualizer init error: {e}")
+            self.visualizer = None
+        # Also assign to viz context used by viz tab
+        self.df_viz = df
+        # Reset simulation and hide controls
+        self._stop_simulation_if_running()
+        self.sim_controls_widget.hide()
+        # Update viz figure to prompt user to select analysis
+        self.viz_stack.setCurrentIndex(0)
+        self.viz_fig.clear()
+        ax = self.viz_fig.add_subplot(111)
+        ax.text(0.5, 0.5, f"'{fname}' loaded.\nPlease select an analysis.", ha='center', va='center')
+        ax.axis('off')
+        self.viz_canvas.draw()
+        # Enable analysis buttons
+        for btn in [self.btn_run_stability, self.btn_run_correlation, self.btn_run_3d_path,
+                    self.btn_run_simulation, self.btn_run_integrated, self.btn_run_aw_volume]:
+            btn.setEnabled(True)
+        # Disable ask LLM about viz until a specific viz is generated
+        self.btn_ask_llm_about_viz.setEnabled(False)
+        # Update chat
+        self.chat.add_bot(f"✅ '{fname}' 파일을 불러왔습니다. 분석을 선택하세요.")
+
+    # 시작하기: 심층 리포트 모드 진입
+    def start_deep_report(self):
+        """
+        Initiate deep report mode. Prompt the user to provide context for an in-depth report.
+        """
+        if self.current_df is None:
+            # If no dataset is loaded, attempt to load all selected files
+            try:
+                selected = self.get_selected_filenames()
+            except Exception:
+                selected = []
+            if selected:
+                # Reset current_dfs list
+                self.current_dfs = []
+                for fname in selected:
+                    # Attempt to load DataFrame (similar to on_load_saved_csv logic)
+                    path_str = None
+                    file_id = self.file_ids.get(fname)
+                    if file_id:
+                        try:
+                            entries = load_registry()
+                            entry = entries.get(file_id)
+                            if entry and entry.get("path"):
+                                path_str = entry["path"]
+                        except Exception:
+                            pass
+                    df_loaded = None
+                    if path_str and os.path.exists(path_str):
+                        try:
+                            df_loaded, meta, _ = load_and_meta(Path(path_str), self.s.meta_json_dir)
+                        except Exception:
+                            try:
+                                df_loaded = pd.read_csv(path_str)
+                            except Exception:
+                                df_loaded = None
+                    if df_loaded is None:
+                        # Fallback to DB table
+                        try:
+                            table = table_name_from_file(fname)
+                            df_loaded = run_sql(self.engine, f'SELECT * FROM "{table}"')
+                        except Exception:
+                            df_loaded = None
+                    if isinstance(df_loaded, pd.DataFrame) and not df_loaded.empty:
+                        self.current_dfs.append((df_loaded, fname))
+                # If at least one dataset loaded, set current_df to the first and update visualizer
+                if self.current_dfs:
+                    # Use the first loaded dataset as current_df for visualization
+                    first_df, first_name = self.current_dfs[0]
+                    self.current_df = first_df
+                    self.df_viz = self.current_df
+                    try:
+                        self.visualizer = AnalysisVisualizer(self.current_df)
+                    except Exception:
+                        self.visualizer = None
+                    # Update viz tab UI to indicate the first file loaded
+                    try:
+                        self._stop_simulation_if_running()
+                        self.sim_controls_widget.hide()
+                        self.viz_stack.setCurrentIndex(0)
+                        self.viz_fig.clear()
+                        ax = self.viz_fig.add_subplot(111)
+                        ax.text(0.5, 0.5, f"'{first_name}' loaded.\nPlease select an analysis.", ha='center', va='center')
+                        ax.axis('off')
+                        self.viz_canvas.draw()
+                        for btn in [self.btn_run_stability, self.btn_run_correlation, self.btn_run_3d_path,
+                                    self.btn_run_simulation, self.btn_run_integrated, self.btn_run_aw_volume]:
+                            btn.setEnabled(True)
+                        self.btn_ask_llm_about_viz.setEnabled(False)
+                    except Exception:
+                        pass
+            # If still no dataset loaded, notify and abort
+            if self.current_df is None:
+                QMessageBox.information(
+                    self, "심층 리포트", "데이터가 로드되어 있지 않습니다. 먼저 CSV 파일을 선택하거나 업로드하세요.")
+                return
+        # Activate deep report mode
+        self.in_deep_report = True
+        self.deep_report_inputs = []
+        # Let user know
+        self.chat.add_bot("심층 리포트 작성을 시작합니다. 보고서에 포함할 정보나 관점을 말씀해주세요.\n완료 시 '끝' 또는 '완료'라고 입력해주세요.")
+        # Switch to report tab for clarity
+        idx = self.tabs.indexOf(self.report_tab)
+        if idx >= 0:
+            self.tabs.setCurrentIndex(idx)
+
+    # 완료: 심층 리포트 생성
+    def generate_deep_report(self):
+        """
+        Compile a deep report from the current dataset and user-provided context using the LLM.
+        """
+        # Exit deep report mode
+        self.in_deep_report = False
+        # If no current dataset, cannot generate deep report
+        if self.current_df is None:
+            QMessageBox.information(self, "심층 리포트", "데이터가 로드되어 있지 않습니다.")
+            return
+        # Prepare summaries for one or multiple datasets
+        dataset_summaries: List[str] = []
+        # If multiple datasets loaded, iterate over them; otherwise use current_df
+        if self.current_dfs:
+            for df_i, name_i in self.current_dfs:
+                # Summarise each dataset individually
+                try:
+                    missing_total_i = int(df_i.isna().sum().sum())
+                except Exception:
+                    missing_total_i = 0
+                try:
+                    desc_df_i = df_i.describe(include="all")
+                    desc_str_i = desc_df_i.to_string(max_cols=6, max_rows=20)
+                except Exception:
+                    desc_str_i = ""
+                try:
+                    preview_df_i = df_i.head(10)
+                    preview_str_i = preview_df_i.to_string(index=False)
+                except Exception:
+                    preview_str_i = ""
+                summary = (
+                    f"[{name_i}]\n"
+                    f"- 총 행수: {len(df_i)}, 총 열수: {df_i.shape[1]}, 결측치 총합: {missing_total_i}\n"
+                    f"- 통계 요약:\n{desc_str_i}\n"
+                    f"- 상위 10행 미리보기:\n{preview_str_i}\n"
+                )
+                dataset_summaries.append(summary)
+            # If more than one dataset, compute comparative statistics across datasets
+            if len(self.current_dfs) > 1:
+                try:
+                    import numpy as _np  # local import to avoid global dependency issues
+                    # Determine common numeric columns across all datasets
+                    numeric_sets = []
+                    for df_i, _name_i in self.current_dfs:
+                        try:
+                            numeric_cols = set(df_i.select_dtypes(include="number").columns)
+                        except Exception:
+                            numeric_cols = set()
+                        numeric_sets.append(numeric_cols)
+                    common_cols = set.intersection(*numeric_sets) if numeric_sets else set()
+                    comparison_lines: List[str] = []
+                    # Limit number of columns to compare for brevity
+                    max_cols_to_compare = 10
+                    col_count = 0
+                    for col in sorted(common_cols):
+                        means = []
+                        for df_i, name_i in self.current_dfs:
+                            try:
+                                mean_val = float(_np.nanmean(_np.asarray(df_i[col], dtype=float)))
+                            except Exception:
+                                mean_val = float('nan')
+                            means.append((name_i, mean_val))
+                        # Remove NaN entries
+                        means_filtered = [(n, m) for n, m in means if m == m]
+                        if len(means_filtered) < 2:
+                            continue
+                        # Sort by mean value descending
+                        means_sorted = sorted(means_filtered, key=lambda x: x[1], reverse=True)
+                        top_name, top_val = means_sorted[0]
+                        bottom_name, bottom_val = means_sorted[-1]
+                        diff_val = top_val - bottom_val
+                        comparison_lines.append(
+                            f"- '{col}' 컬럼 평균: {top_name}({top_val:.3g}) > {bottom_name}({bottom_val:.3g}), 차이 {diff_val:.3g}"
+                        )
+                        col_count += 1
+                        if col_count >= max_cols_to_compare:
+                            break
+                    if comparison_lines:
+                        comparison_text = "\n".join(comparison_lines)
+                        dataset_summaries.append(
+                            "[데이터 간 비교] (공통 숫자 컬럼 평균 비교)\n" + comparison_text + "\n"
+                        )
+                except Exception:
+                    # On any error, silently ignore comparative summary
+                    pass
+        else:
+            # Fallback: use current_df only
+            df = self.current_df
+            try:
+                missing_total = int(df.isna().sum().sum())
+            except Exception:
+                missing_total = 0
+            try:
+                desc_df = df.describe(include="all")
+                desc_str = desc_df.to_string(max_cols=6, max_rows=20)
+            except Exception:
+                desc_str = ""
+            try:
+                preview_df = df.head(10)
+                preview_str = preview_df.to_string(index=False)
+            except Exception:
+                preview_str = ""
+            summary = (
+                f"[{getattr(self, 'selected_dataset_name', '데이터')}]\n"
+                f"- 총 행수: {len(df)}, 총 열수: {df.shape[1]}, 결측치 총합: {missing_total}\n"
+                f"- 통계 요약:\n{desc_str}\n"
+                f"- 상위 10행 미리보기:\n{preview_str}\n"
+            )
+            dataset_summaries.append(summary)
+        # Combine user context
+        user_context = "\n".join(self.deep_report_inputs).strip()
+        if not user_context:
+            user_context = "(사용자가 추가 정보를 제공하지 않았습니다.)"
+        # Build overall dataset summary block
+        combined_summary = "\n".join(dataset_summaries)
+        # Build prompt for the LLM to generate a deep report
+        prompt = (
+            "당신은 제조 공정 데이터 분석을 수행하는 전문 리포트 작성자입니다. "
+            "아래 제공된 사용자 입력과 데이터 요약들을 바탕으로 심층 보고서를 작성하세요.\n"
+            "보고서는 한국어로 작성하며, 각 섹션을 명확한 제목으로 구분하고, 데이터 기반 통찰과 해석, 제한 사항 및 추천을 포함해야 합니다.\n\n"
+            f"[사용자 입력]\n{user_context}\n\n"
+            f"[데이터 요약]\n{combined_summary}\n\n"
+            "위 정보를 바탕으로 심층 분석 보고서를 작성해주세요."
+        )
+        # Invoke the LLM to generate the report
+        try:
+            deep_report_text = self.llm.invoke(prompt).content
+        except Exception as e:
+            deep_report_text = f"심층 리포트 생성 중 오류가 발생했습니다: {e}"
+        # Display the report in the report tab
+        try:
+            self.report.setPlainText(deep_report_text)
+        except Exception:
+            self.report.setPlainText(str(deep_report_text))
+        # Notify via chat
+        self.chat.add_bot("📄 심층 리포트가 생성되었습니다. 보고서 탭에서 확인하세요.")
+        # Ensure report tab is active
+        idx = self.tabs.indexOf(self.report_tab)
+        if idx >= 0:
+            self.tabs.setCurrentIndex(idx)
+
+    # 고급 시각화 처리
+    def show_visualization(self, viz_type: str):
+        """
+        Generate and display advanced visualizations in the LLM results area based on the
+        provided viz_type. Uses self.visualizer and self.current_df.
+
+        Supported viz_type values:
+          - 'correlation': 상관관계 대시보드
+          - '3d': 3D 경로 (정적)
+          - 'simulation': 공정 시뮬레이션 (메시지로 안내)
+          - 'aw': A*W 적층 부피 (메시지로 안내)
+          - 'mpt_time': 시간 대비 MPT 변화 그래프
+          - other: 메시지로 안내
+        """
+        # Ensure there is a dataset to visualize
+        if self.visualizer is None or self.current_df is None:
+            QMessageBox.information(self, "시각화", "먼저 CSV 파일을 선택하거나 업로드하여 분석을 진행하세요.")
+            return
+        # Clear existing figure
+        try:
+            self.adv_fig.clear()
+        except Exception:
+            self.adv_fig = plt.figure()
+            self.adv_canvas = FigureCanvas(self.adv_fig)
+        success = True
+        try:
+            if viz_type == 'correlation':
+                self.visualizer.plot_correlation_dashboard(self.adv_fig)
+            elif viz_type == '3d':
+                self.visualizer.plot_3d_path(self.adv_fig)
+            elif viz_type == 'simulation':
+                # Provide guidance that interactive simulation is only available in the Viz tab
+                ax = self.adv_fig.add_subplot(111)
+                ax.text(0.5, 0.5, "공정 시뮬레이션은 시각화 탭에서 실행할 수 있습니다.", ha='center', va='center')
+                ax.axis('off')
+            elif viz_type == 'aw':
+                # Provide guidance that AW dashboard is only available in the Viz tab
+                ax = self.adv_fig.add_subplot(111)
+                ax.text(0.5, 0.5, "A*W 대시보드는 시각화 탭에서 실행할 수 있습니다.", ha='center', va='center')
+                ax.axis('off')
+            elif viz_type == 'mpt_time':
+                # Draw MPT vs Time line chart using relative time in seconds
+                if "time" not in self.current_df.columns or "MPT" not in self.current_df.columns:
+                    ax = self.adv_fig.add_subplot(111)
+                    ax.text(0.5, 0.5, "'time' 또는 'MPT' 컬럼이 없어 그래프를 그릴 수 없습니다.", ha='center', va='center')
+                    ax.axis('off')
+                else:
+                    # Parse time column with custom logic: treat last 3 digits as ms
+                    def parse_custom_time(s: str):
+                        if isinstance(s, str):
+                            parts = s.split('_')
+                            if len(parts) == 6 and len(parts[-1]) == 3 and parts[-1].isdigit():
+                                s_mod = '_'.join(parts[:-1] + [parts[-1] + '000'])
+                                try:
+                                    return pd.to_datetime(s_mod, format="%m_%d_%H_%M_%S_%f")
+                                except Exception:
+                                    pass
+                        try:
+                            return pd.to_datetime(s)
+                        except Exception:
+                            return pd.NaT
+                    t_series = self.current_df["time"].apply(parse_custom_time)
+                    # Drop invalid times
+                    valid_mask = t_series.notna()
+                    t_series = t_series[valid_mask]
+                    mpt_series = pd.to_numeric(self.current_df.loc[valid_mask, "MPT"], errors="coerce")
+                    # If less than 2 valid points, show message
+                    if len(t_series) < 2:
+                        ax = self.adv_fig.add_subplot(111)
+                        ax.text(0.5, 0.5, "유효한 시간 데이터가 충분하지 않습니다.", ha='center', va='center')
+                        ax.axis('off')
+                    else:
+                        # Compute elapsed seconds relative to start
+                        elapsed = (t_series - t_series.iloc[0]).dt.total_seconds()
+                        ax = self.adv_fig.add_subplot(111)
+                        ax.plot(elapsed, mpt_series, marker='o')
+                        ax.set_xlabel("경과 시간 (초)")
+                        ax.set_ylabel("MPT")
+                        ax.set_title("시간 대비 MPT 변화")
+                        ax.grid(True)
+            else:
+                ax = self.adv_fig.add_subplot(111)
+                ax.text(0.5, 0.5, "해당 시각화는 지원되지 않습니다.", ha='center', va='center')
+                ax.axis('off')
+        except Exception as e:
+            success = False
+            self.adv_fig.clear()
+            ax = self.adv_fig.add_subplot(111)
+            ax.text(0.5, 0.5, f"시각화 오류: {e}", ha='center', va='center')
+            ax.axis('off')
+        # Redraw the canvas
+        try:
+            self.adv_canvas.draw()
+        except Exception:
+            pass
+        # Show the advanced tab
+        idx = self.tabs.indexOf(self.adv_canvas)
+        if idx >= 0:
+            self.tabs.setCurrentIndex(idx)
+        # Mark that an advanced visualization was shown for the current query
+        self._advanced_triggered = True
         # 창 닫을 때 정리
     def closeEvent(self, event):
         try:

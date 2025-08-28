@@ -1,0 +1,301 @@
+{
+  "file": "1_data(bead1~4, TRUE).csv",
+  "rows": 4580,
+  "cols": 21,
+  "columns": {
+    "time": {
+      "dtype": "object",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "07_11_14_09_41_631",
+        "07_11_14_09_41_640",
+        "07_11_14_09_41_650"
+      ]
+    },
+    "x": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "-7.88",
+        "-7.88",
+        "-7.88"
+      ],
+      "stats": {
+        "min": -7.88,
+        "max": 112.11,
+        "mean": 51.791403930131004
+      }
+    },
+    "y": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "-2.18",
+        "-2.18",
+        "-2.18"
+      ],
+      "stats": {
+        "min": -2.18,
+        "max": 101.05,
+        "mean": 44.643390829694326
+      }
+    },
+    "z": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "-32.32",
+        "-32.32",
+        "-32.32"
+      ],
+      "stats": {
+        "min": -32.34,
+        "max": -32.31,
+        "mean": -32.31980349344978
+      }
+    },
+    "e1": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "-0.2",
+        "-0.2",
+        "-0.2"
+      ],
+      "stats": {
+        "min": -0.2,
+        "max": -0.2,
+        "mean": -0.2
+      }
+    },
+    "e2": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "346.5",
+        "346.5",
+        "346.5"
+      ],
+      "stats": {
+        "min": 346.5,
+        "max": 346.5,
+        "mean": 346.5
+      }
+    },
+    "s_lp": {
+      "dtype": "int64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "3200",
+        "3200",
+        "3200"
+      ],
+      "stats": {
+        "min": 3200.0,
+        "max": 3200.0,
+        "mean": 3200.0
+      }
+    },
+    "s_rs": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "0.00833",
+        "0.00833",
+        "0.00833"
+      ],
+      "stats": {
+        "min": 0.00833,
+        "max": 0.025,
+        "mean": 0.008468310043668124
+      }
+    },
+    "s_ws": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "0.9375",
+        "0.9375",
+        "0.9375"
+      ],
+      "stats": {
+        "min": 0.7031,
+        "max": 0.9375,
+        "mean": 0.9212786026200873
+      }
+    },
+    "r_lp": {
+      "dtype": "int64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "0",
+        "0",
+        "0"
+      ],
+      "stats": {
+        "min": 0.0,
+        "max": 3026.0,
+        "mean": 2992.5045851528384
+      }
+    },
+    "r_rs": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "0.0",
+        "0.0",
+        "0.0"
+      ],
+      "stats": {
+        "min": 0.0,
+        "max": 0.00833,
+        "mean": 0.008020882096069869
+      }
+    },
+    "r_ws": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "0.1917",
+        "0.1917",
+        "0.1917"
+      ],
+      "stats": {
+        "min": 0.0,
+        "max": 0.961,
+        "mean": 0.8666275109170306
+      }
+    },
+    "mpt": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "706.51717",
+        "706.51717",
+        "706.51717"
+      ],
+      "stats": {
+        "min": 705.74299,
+        "max": 1629.08154,
+        "mean": 1475.4115053646287
+      }
+    },
+    "mpa": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "0.0",
+        "0.0",
+        "0.0"
+      ],
+      "stats": {
+        "min": 0.0,
+        "max": 79.932,
+        "mean": 9.407969213973798
+      }
+    },
+    "mpw": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "0.0",
+        "0.0",
+        "0.0"
+      ],
+      "stats": {
+        "min": 0.0,
+        "max": 10.02905913,
+        "mean": 1.4061989815054585
+      }
+    },
+    "load": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "2.95386",
+        "2.8958",
+        "2.92547"
+      ],
+      "stats": {
+        "min": 1.90872,
+        "max": 3.07773,
+        "mean": 2.889215008733624
+      }
+    },
+    "contact": {
+      "dtype": "float64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "0.29455",
+        "0.41197",
+        "0.44165"
+      ],
+      "stats": {
+        "min": 0.28423,
+        "max": 4.92802,
+        "mean": 4.868534834061135
+      }
+    },
+    "bead_number": {
+      "dtype": "int64",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "1",
+        "1",
+        "1"
+      ],
+      "stats": {
+        "min": 1.0,
+        "max": 4.0,
+        "mean": 2.39235807860262
+      }
+    },
+    "laser_on": {
+      "dtype": "bool",
+      "non_null": 4580,
+      "nulls": 0,
+      "sample": [
+        "True",
+        "True",
+        "True"
+      ],
+      "stats": {
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0
+      }
+    },
+    "unnamed_19": {
+      "dtype": "float64",
+      "non_null": 0,
+      "nulls": 4580,
+      "sample": []
+    },
+    "unnamed_20": {
+      "dtype": "object",
+      "non_null": 1,
+      "nulls": 4579,
+      "sample": [
+        "row : 4580"
+      ]
+    }
+  }
+}

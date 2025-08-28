@@ -879,18 +879,47 @@ class MainWindow(QWidget):
         except: pass
 
         def _task(file_paths, progress_callback, cancel_event):
+            """
+            Ingest CSV files and compute basic statistics/preview for each.
+
+            Returns (ok, fail, results) where results contains tuples:
+            (filename, rows, cols, missing_total, desc_str, preview_str, df)
+            for each successfully processed file. These additional values
+            enable later rendering of summary and preview in the UI.
+            """
             ok, fail, results = 0, [], []
             for i, p_str in enumerate(file_paths, 1):
-                if cancel_event.is_set(): break
+                if cancel_event.is_set():
+                    break
                 path = Path(p_str)
                 progress_callback(i - 1, f"{path.name} 처리 중...")
                 try:
+                    # Load CSV and metadata
                     df, meta, _ = load_and_meta(path, self.s.meta_json_dir)
+                    # Register file into registry
                     entry = upsert_entry(path, rows=meta["rows"], cols=meta["cols"], status="indexed")
+                    # Insert embeddings per column
                     upsert_texts(self.chroma, entry.file_id, build_embedding_texts_from_meta(meta))
+                    # Ingest into SQL table
                     table = table_name_from_file(path.name)
-                    ingest_df(self.engine, df, table); ensure_indexes(self.engine, table)
-                    results.append((path.name, meta["rows"], meta["cols"]))
+                    ingest_df(self.engine, df, table)
+                    ensure_indexes(self.engine, table)
+                    # Compute statistics
+                    try:
+                        missing_total = int(df.isna().sum().sum())
+                    except Exception:
+                        missing_total = 0
+                    try:
+                        desc_df = df.describe(include="all")
+                        desc_str = desc_df.to_string(max_cols=6, max_rows=10)
+                    except Exception:
+                        desc_str = ""
+                    try:
+                        preview_df = df.head(20)
+                        preview_str = preview_df.to_string(index=False)
+                    except Exception:
+                        preview_str = ""
+                    results.append((path.name, meta["rows"], meta["cols"], missing_total, desc_str, preview_str, df))
                     ok += 1
                 except Exception as e:
                     fail.append(f"{path.name}: {e}")
@@ -898,22 +927,50 @@ class MainWindow(QWidget):
 
         def _done(res, err):
             prog.close()
-            if err: return QMessageBox.critical(self, "CSV 처리 오류", str(err))
+            if err:
+                return QMessageBox.critical(self, "CSV 처리 오류", str(err))
             ok, fail, results = res
-
-            for name, rows, cols in results:
+            last_df = None
+            # Populate UI for new files and append summaries
+            for (name, rows, cols, missing_total, desc_str, preview_str, df) in results:
+                # Add to new files list
                 it = QListWidgetItem(f"{name} ({rows}x{cols})")
                 it.setData(Qt.UserRole, name)
                 it.setCheckState(Qt.Unchecked)
                 self.csv_new_list.addItem(it)
+                # Notify via chat
                 self.chat.add_bot(f"✅ 업로드 완료: {name}")
-
-            self.refresh_csv_saved_list() # 저장된 목록 갱신
-            self.update_report_summary()  # 리포트 탭 갱신
-
-            summary = f"성공: {ok}건"
-            if fail: summary += f"\n실패: {len(fail)}건\n" + "\n".join(fail)
-            QMessageBox.information(self, "CSV 처리 완료", summary)
+                # Build summary text
+                summary_text = (
+                    f"[파일] {name}\n"
+                    f"- 행 수: {rows}\n"
+                    f"- 열 수: {cols}\n"
+                    f"- 결측치 총합: {missing_total}\n"
+                )
+                if desc_str:
+                    summary_text += f"\n[통계 요약]\n{desc_str}\n"
+                if preview_str:
+                    summary_text += f"\n[미리보기]\n{preview_str}\n"
+                try:
+                    # Append to report tab
+                    self.report.append(summary_text)
+                except Exception:
+                    current_text = self.report.toPlainText()
+                    self.report.setPlainText(current_text + "\n" + summary_text)
+                last_df = df
+            # Refresh saved list
+            self.refresh_csv_saved_list()
+            # Render preview of last uploaded file
+            if last_df is not None:
+                try:
+                    self.render_all(last_df, sql=None)
+                except Exception:
+                    pass
+            # Summary message
+            summary_msg = f"성공: {ok}건"
+            if fail:
+                summary_msg += f"\n실패: {len(fail)}건\n" + "\n".join(fail)
+            QMessageBox.information(self, "CSV 처리 완료", summary_msg)
 
         worker, thread = run_in_thread(self, _task, _done, paths, progress_callback=None, cancel_event=cancel_event)
         worker.progress.connect(lambda i, msg: (prog.setValue(i), prog.setLabelText(msg)))
@@ -1054,15 +1111,34 @@ class MainWindow(QWidget):
             final_text = llm_final_only(self.llm, prompt_for_llm, df_snip, meta_snip, tone)
             checks_list = llm_checks_only(self.llm, prompt_for_llm, df_snip, meta_snip)
 
+            # Build evidence lines
             ev_lines = ["## 사용 근거"]
-            if sql: ev_lines += ["### 사용 SQL", "```sql", sql.strip(), "```"]
-            if isinstance(df, pd.DataFrame): ev_lines += ["### SQL 결과 개요", f"- 행 수: {len(df)}", f"- 열 수: {df.shape[1]}"]
+            if sql:
+                ev_lines += ["### 사용 SQL", "```sql", sql.strip(), "```"]
+            # Include basic info about SQL result
+            if isinstance(df, pd.DataFrame):
+                ev_lines += [
+                    "### SQL 결과 개요",
+                    f"- 행 수: {len(df)}",
+                    f"- 열 수: {df.shape[1]}"
+                ]
+                # Append preview of the first 10 rows
+                try:
+                    preview = df.head(10).to_string(index=False)
+                    ev_lines += ["", "### SQL 결과 미리보기", preview]
+                except Exception:
+                    pass
+            # Include RAG evidence snippet
             if docs:
                 ev_lines.append("### RAG 근거(상위 문서 첫 줄)")
                 for i, d in enumerate(docs[:5], 1):
                     ev_lines.append(f"{i}. {getattr(d, 'page_content', str(d)).splitlines()[0][:200]}")
-            if checks_list: ev_lines += ["", "## 추가 확인 항목", checks_list]
-            if err_sql and not sql: ev_lines += ["", "### SQL 생성/실행 참고", err_sql]
+            # Additional checks list
+            if checks_list:
+                ev_lines += ["", "## 추가 확인 항목", checks_list]
+            # SQL generation/ execution errors
+            if err_sql and not sql:
+                ev_lines += ["", "### SQL 생성/실행 참고", err_sql]
             return (q, final_text, df, sql, "\n".join(ev_lines))
 
         def _done(res, err):
@@ -1070,11 +1146,33 @@ class MainWindow(QWidget):
             if err:
                 return QMessageBox.critical(self, "질의 오류", str(err))
             q, final_text, df, sql, evidence_text = res
+            # Display chatbot response
             self.chat.add_bot(final_text)
-            self.history.append((q, final_text)); self.save_history()
+            # Save history
+            self.history.append((q, final_text))
+            self.save_history()
+            # Render table and chart for SQL result
             if isinstance(df, pd.DataFrame):
                 self.render_all(df, sql)
+            # Show evidence text
             self.evidence.setPlainText(evidence_text)
+            # Simple keyword-based visualization triggers
+            try:
+                query_lower = q.lower()
+                # Correlation dashboard
+                if any(k in query_lower for k in ["상관관계", "correlation"]):
+                    QTimer.singleShot(0, self.run_correlation_dashboard)
+                # 3D path analysis
+                elif any(k in query_lower for k in ["3d", "경로", "path"]):
+                    QTimer.singleShot(0, self.run_3d_path_analysis)
+                # Process simulation
+                elif any(k in query_lower for k in ["시뮬레이션", "simulation"]):
+                    QTimer.singleShot(0, self.run_process_simulation)
+                # A*W volume dashboard
+                elif any(k in query_lower for k in ["a*w", "aw"]):
+                    QTimer.singleShot(0, self.run_aw_volume_dashboard)
+            except Exception:
+                pass
 
         run_in_thread(self, _task, _done)
 

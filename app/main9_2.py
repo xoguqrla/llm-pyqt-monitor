@@ -620,36 +620,49 @@ class MainWindow(QWidget):
         self._stop_simulation_if_running()
         self.sim_frame_index = 0
         if self.sim_handles:
-            for actor in self.sim_handles["bead_actors"]:
-                if actor: actor.SetVisibility(False)
-            self._update_simulation_frame()
+            # 전체 숨김(알파 0)
+            base = self.sim_handles["base_rgba"]
+            cur = base.copy()
+            cur[:, 3] = 0
+            self.sim_handles["rgba_current"] = cur
+            self.sim_handles["path_poly"]["RGBA"] = cur
+            # 헤드 위치를 시작점으로
+            self.sim_handles["head_actor"].SetPosition(self.sim_handles["points"][0])
+            self.pv_plotter.render()
+
     
     def _update_simulation_frame(self):
         if (not self.sim_handles) or (self.sim_frame_index >= len(self.sim_handles["sim_df"])):
             self._stop_simulation_if_running(); return
 
+        i = self.sim_frame_index
         sim_df = self.sim_handles["sim_df"]
-        current_point = self.sim_handles["points"][self.sim_frame_index]
 
-        # 1. 3D 헤드 업데이트
-        self.sim_handles["head_actor"].SetPosition(current_point)
+        # 1) 누적(쌓이기): alpha만 앞부분 켜기
+        cur = self.sim_handles["rgba_current"]
+        base = self.sim_handles["base_rgba"]
+        end = min(i + 1, len(cur))
+        if end > 0:
+            cur[:end, :] = base[:end, :]  # 앞부분을 최종 색으로 (alpha 포함)
+            self.sim_handles["path_poly"]["RGBA"] = cur
 
-        # 2. 모든 bead_actors를 순회하며, 현재까지의 spot은 보이게
-        for i, actor in enumerate(self.sim_handles["bead_actors"]):
-            if actor:
-                actor.SetVisibility(i <= self.sim_frame_index)
+        # 2) 헤드 이동
+        self.sim_handles["head_actor"].SetPosition(self.sim_handles["points"][i])
 
+        # 3) 렌더
         self.pv_plotter.render()
 
-        if self.sim_frame_index + 1 < len(sim_df):
-            interval_ms = sim_df['time_delta_ms'].iloc[self.sim_frame_index + 1]
-            playback_speed = self.speed_slider.value() / 10.0
-            adjusted_interval = int(interval_ms / playback_speed) if playback_speed > 0 else 0
-            self.simulation_timer.setInterval(max(0, adjusted_interval))
+        # 4) 다음 프레임 간격(최소 15ms)
+        if i + 1 < len(sim_df):
+            interval_ms = float(sim_df['time_delta_ms'].iloc[i + 1])
+            playback_speed = max(0.1, self.speed_slider.value() / 10.0)
+            adjusted = max(15, int(interval_ms / playback_speed))
+            self.simulation_timer.setInterval(adjusted)
         else:
             self._stop_simulation_if_running()
 
         self.sim_frame_index += 1
+
 
     def ask_llm_about_viz(self):
         if self.viz_context:
