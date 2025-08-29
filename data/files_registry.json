@@ -44,51 +44,6 @@
     "cols": 19,
     "updated_at": 1754284411.758355
   },
-  "003y_data.csv:b6217cbb78": {
-    "file_id": "003y_data.csv:b6217cbb78",
-    "path": "C:\\Users\\KAMIC\\Desktop\\20250505_experiment_1\\003y_data.csv",
-    "sha256": "b6217cbb78cabbda2baba5259ad7114480cbca8e6beae23585965b6858674068",
-    "status": "indexed",
-    "rows": 13456,
-    "cols": 19,
-    "updated_at": 1753947456.9729145
-  },
-  "002_data.csv:6140547de8": {
-    "file_id": "002_data.csv:6140547de8",
-    "path": "C:\\Users\\KAMIC\\Desktop\\20250505_experiment_1\\002_data.csv",
-    "sha256": "6140547de8d7e0ec7aaf77612ce175dcfe99cf2204223ec485ab1ffb6ecb26bb",
-    "status": "indexed",
-    "rows": 10484,
-    "cols": 19,
-    "updated_at": 1753947461.2578745
-  },
-  "003_data.csv:cf5db2ef6a": {
-    "file_id": "003_data.csv:cf5db2ef6a",
-    "path": "C:\\Users\\KAMIC\\Desktop\\20250505_experiment_1\\003_data.csv",
-    "sha256": "cf5db2ef6a8fee39c31e6597e5b3edf5a83882a6e67aef7e47ed2d8f4eb5c4ce",
-    "status": "indexed",
-    "rows": 12759,
-    "cols": 19,
-    "updated_at": 1753947463.245977
-  },
-  "001_data.csv:93191d8e1f": {
-    "file_id": "001_data.csv:93191d8e1f",
-    "path": "C:\\Users\\KAMIC\\Desktop\\20250505_experiment_1\\001_data.csv",
-    "sha256": "93191d8e1f2482d863deb84b9df8dd7b061253ee7667a9cc9267c124f4710a01",
-    "status": "indexed",
-    "rows": 10848,
-    "cols": 19,
-    "updated_at": 1753947465.696375
-  },
-  "005_1_data.csv:ccfc4d4bed": {
-    "file_id": "005_1_data.csv:ccfc4d4bed",
-    "path": "C:\\Users\\KAMIC\\Desktop\\005_1_data.csv",
-    "sha256": "ccfc4d4bede49044c25fd982711b79952e5b489f0af807fbf29b7a4cf42a81fa",
-    "status": "indexed",
-    "rows": 499,
-    "cols": 19,
-    "updated_at": 1755673848.5852327
-  },
   "merged_data.csv:c4cb178442": {
     "file_id": "merged_data.csv:c4cb178442",
     "path": "C:\\Users\\KAMIC\\Desktop\\merged_data.csv",
@@ -143,42 +98,6 @@
     "cols": 0,
     "updated_at": 1755669469.241832
   },
-  "1_data(bead1~4, TRUE).csv:6e8e42c9d6": {
-    "file_id": "1_data(bead1~4, TRUE).csv:6e8e42c9d6",
-    "path": "C:\\Users\\KAMIC\\Desktop\\1_data(bead1~4, TRUE).csv",
-    "sha256": "6e8e42c9d68c54172f3699cb8f2ee49bd348f8c694209d5daa4794b464b366b3",
-    "status": "indexed",
-    "rows": 4580,
-    "cols": 21,
-    "updated_at": 1755673834.0935068
-  },
-  "1_data.csv:f0a05ada51": {
-    "file_id": "1_data.csv:f0a05ada51",
-    "path": "C:\\Users\\KAMIC\\Desktop\\1_data.csv",
-    "sha256": "f0a05ada517bb711c9411e05b9b026d40023b07331628174e0e764473dc5a87d",
-    "status": "indexed",
-    "rows": 82920,
-    "cols": 19,
-    "updated_at": 1755673837.5182598
-  },
-  "df1_sorted.csv:94ef3daa2f": {
-    "file_id": "df1_sorted.csv:94ef3daa2f",
-    "path": "C:\\Users\\KAMIC\\Desktop\\df1_sorted.csv",
-    "sha256": "94ef3daa2ffd837517dd0b5e01c788401d784782e4f5f6b5803c32ff592a053f",
-    "status": "indexed",
-    "rows": 1100,
-    "cols": 6,
-    "updated_at": 1755673849.6804466
-  },
-  "df1_unsorted.csv:3a2e9a3828": {
-    "file_id": "df1_unsorted.csv:3a2e9a3828",
-    "path": "C:\\Users\\KAMIC\\Desktop\\df1_unsorted.csv",
-    "sha256": "3a2e9a3828c96e738b339631b5acc1fba84dad632500aa1299886e67cc4893dc",
-    "status": "indexed",
-    "rows": 1100,
-    "cols": 6,
-    "updated_at": 1755673850.2222674
-  },
   "merged_data_total.csv:9ce882546b": {
     "file_id": "merged_data_total.csv:9ce882546b",
     "path": "C:\\Users\\KAMIC\\Desktop\\merged_data_total.csv",
@@ -196,5 +115,14 @@
     "rows": 2449196,
     "cols": 22,
     "updated_at": 1755848175.9612339
+  },
+  "1_data.csv:eedcc34339": {
+    "file_id": "1_data.csv:eedcc34339",
+    "path": "Z:\\KAMIC\\01.KAMIC_장비\\32. Laser-Wire DED\\21. 모니터링데이터\\DB\\20250224_Jisu_recorn_cont2(완)\\1_data.csv",
+    "sha256": "eedcc34339f371ddb26206affdba1d968ee410914b47de2e9baf9fd214c3a0f8",
+    "status": "indexed",
+    "rows": 10795,
+    "cols": 19,
+    "updated_at": 1756381880.688506
   }
 }

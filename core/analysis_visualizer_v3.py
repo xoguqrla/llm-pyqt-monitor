@@ -287,27 +287,51 @@ class AnalysisVisualizer:
             )
 
         ax = fig.add_subplot(111, projection="3d")
-        required = {"X", "Y", "Z", "MPT"}
-        if not required.issubset(df_plot.columns):
-            ax.text(0.5, 0.5, "X/Y/Z/MPT columns required.", ha="center")
-            ax.axis("off")
+        # Require X, Y, Z, MPT columns (case-insensitive).  Normalize column names to lower-case
+        required = {"x", "y", "z", "mpt"}
+        cols_lower = {c.lower() for c in df_plot.columns}
+        # If required columns are missing, display a message without causing a 3D text error
+        if not required.issubset(cols_lower):
+            message = "X/Y/Z/MPT columns required."
+            # For a 3D axis, text() requires x, y, z, s; use text2D to draw in axes coordinates
+            try:
+                ax.text2D(0.5, 0.5, message, transform=ax.transAxes, ha="center", va="center")
+                # Hide ticks and grid for clarity
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.set_zticks([])
+            except Exception:
+                # Fallback: display the message in a standard 2D axis
+                fig.clear()
+                ax2d = fig.add_subplot(111)
+                ax2d.text(0.5, 0.5, message, ha="center", va="center")
+                ax2d.set_axis_off()
             fig.tight_layout()
             return fig
 
+        # Determine actual column names for X, Y, Z, and MPT (case-insensitive)
+        col_map = {}
+        for req in required:
+            for c in df_plot.columns:
+                if c.lower() == req:
+                    col_map[req] = c
+                    break
+        # Scatter plot with correct column names
         sc = ax.scatter(
-            df_plot["X"],
-            df_plot["Y"],
-            df_plot["Z"],
-            c=df_plot["MPT"],
+            df_plot[col_map["x"]],
+            df_plot[col_map["y"]],
+            df_plot[col_map["z"]],
+            c=df_plot[col_map["mpt"]],
             cmap="plasma",
             s=5,
         )
         ax.set_title("3D Process Path with MPT", fontsize=14)
-        ax.set_xlabel("X-Coordinate")
-        ax.set_ylabel("Y-Coordinate")
-        ax.set_zlabel("Z-Coordinate")
+        # Label axes using the actual column names for clarity
+        ax.set_xlabel(col_map.get("x", "X"))
+        ax.set_ylabel(col_map.get("y", "Y"))
+        ax.set_zlabel(col_map.get("z", "Z"))
         cbar = fig.colorbar(sc, ax=ax, shrink=0.7)
-        cbar.set_label("MPT")
+        cbar.set_label(col_map.get("mpt", "MPT"))
         fig.tight_layout()
         return fig
 

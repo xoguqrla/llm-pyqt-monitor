@@ -288,9 +288,22 @@ class AnalysisVisualizer:
 
         ax = fig.add_subplot(111, projection="3d")
         required = {"X", "Y", "Z", "MPT"}
+        # If required columns are missing, display a message without causing a 3D text error
         if not required.issubset(df_plot.columns):
-            ax.text(0.5, 0.5, "X/Y/Z/MPT columns required.", ha="center")
-            ax.axis("off")
+            # For a 3D axis, text() requires x, y, z, s; using text2D draws in 2D coordinate system
+            try:
+                ax.text2D(0.5, 0.5, "X/Y/Z/MPT columns required.", transform=ax.transAxes, ha="center")
+                # Hide ticks and grid for clarity
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.set_zticks([])
+            except Exception:
+                # Fallback to a regular 2D subplot for compatibility
+                fig.clear()
+                ax2d = fig.add_subplot(111)
+                ax2d.text(0.5, 0.5, "X/Y/Z/MPT columns required.", ha="center", va="center")
+                ax2d.set_axis_off()
+                return fig
             fig.tight_layout()
             return fig
 
