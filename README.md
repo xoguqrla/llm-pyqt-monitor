@@ -46,6 +46,58 @@ flowchart TD
 * **Vector DB (Chroma)** – 문서 임베딩과 Evidence 기반 검색
 
 ---
+flowchart TD
+    subgraph GUI["사용자 GUI (PyQt5)"]
+        U1["CSV 업로드/삭제"]
+        U2["질문 입력 (NLQ)"]
+        U3["결과 확인 (Table/Chart/Evidence/Report)"]
+    end
+
+    subgraph DataModule["데이터 관리 모듈"]
+        D1["CSV 로드 (pandas)"]
+        D2["메타데이터 생성 (JSON)"]
+        D3["files_registry.json 기록"]
+    end
+
+    subgraph DB["PostgreSQL / SQLite"]
+        T1["CSV 데이터 테이블 (t_filename)"]
+    end
+
+    subgraph VectorDB["Chroma Vector DB"]
+        V1["file_meta_openai (CSV 메타데이터)"]
+        V2["expert_comments (전문가 코멘트)"]
+    end
+
+    subgraph LLM["LLM 분석 모듈"]
+        L1["프롬프트 빌더 (build_prompt)"]
+        L2["NLQ → SQL 변환 (generate_sql_from_nlq)"]
+        L3["SQL 실행 결과 해석"]
+        L4["RAG 검색 (메타데이터+전문가 코멘트)"]
+        L5["최종 응답 생성 (llm_final_only)"]
+    end
+
+    subgraph Visualizer["Analysis Visualizer (Matplotlib / PyVista)"]
+        VIZ1["SQL 결과 시각화"]
+        VIZ2["메타데이터 기반 차트"]
+    end
+
+    %% Flows
+    U1 --> D1 --> D2 --> DB
+    D2 --> V1
+    D3 --> GUI
+
+    U2 --> LLM
+    LLM -->|SQL 실행| DB
+    LLM -->|RAG 질의응답| VectorDB
+
+    DB --> LLM
+    VectorDB --> LLM
+    LLM --> U3
+
+    Visualizer --> U3
+    DB --> Visualizer
+
+---
 
 ## ✨ 주요 기능 (Features)
 
