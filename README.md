@@ -44,8 +44,10 @@ flowchart TD
 * **Analysis Visualizer** – SQL 실행 결과/그래프를 GUI에 출력
 * **LLM 분석 모듈** – NLQ→SQL 변환 및 RAG 기반 PDF/CSV 질의응답
 * **Vector DB (Chroma)** – 문서 임베딩과 Evidence 기반 검색
+---
 
 ## 🏗 아키텍처2 (Architecture)
+
 ```mermaid
 flowchart TD
     subgraph GUI["사용자 GUI (PyQt5)"]
