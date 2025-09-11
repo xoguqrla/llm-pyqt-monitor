@@ -1,3 +1,5 @@
+---
+
 # 🚀 LLM\_PyQt\_Platform
 
 **LLM\_PyQt\_Platform**은 **실시간 데이터 분석, 시각화, 그리고 LLM 기반 질의응답**을 통합한 차세대 분석 플랫폼입니다.
@@ -21,7 +23,7 @@ PyQt 기반의 직관적인 GUI와 Python 생태계를 활용해 **데이터 업
 
 ---
 
-## 🏗 아키텍처 (Architecture)
+## 🏗 아키텍처 (Architecture 1 – 심플 뷰)
 
 ```mermaid
 flowchart TD
@@ -42,11 +44,12 @@ flowchart TD
 * **데이터 관리 모듈** – CSV/DB 업로드, 자동 통계 요약, DB 연동
 * **PostgreSQL** – 구조화된 데이터 저장소
 * **Analysis Visualizer** – SQL 실행 결과/그래프를 GUI에 출력
-* **LLM 분석 모듈** – NLQ→SQL 변환 및 RAG 기반 PDF/CSV 질의응답
+* **LLM 분석 모듈** – NLQ→SQL 변환 및 RAG 기반 질의응답
 * **Vector DB (Chroma)** – 문서 임베딩과 Evidence 기반 검색
+
 ---
 
-## 🏗 아키텍처2 (Architecture)
+## 🏗 아키텍처 (Architecture 2 – 상세 뷰)
 
 ```mermaid
 flowchart TD
@@ -99,9 +102,10 @@ flowchart TD
 
     Visualizer --> U3
     DB --> Visualizer
----
+```
 
 ---
+
 ## ✨ 주요 기능 (Features)
 
 * **데이터 관리 (Data Management)**
@@ -113,14 +117,14 @@ flowchart TD
 * **데이터 분석 & 시각화 (Analysis & Visualization)**
 
   * PyQt 대시보드에서 표/그래프 실시간 출력
-  * Matplotlib, Plotly 기반 고급 시각화
+  * Matplotlib, PyVista 기반 고급 시각화
   * SQL 결과와 Evidence 패널 자동 연동
 
 * **LLM 기반 분석 (LLM-Powered Analysis)**
 
   * LangChain + OpenAI API 연동
   * 자연어 질의(NLQ) → SQL 자동 변환
-  * RAG 기반 PDF/CSV 문서 질의응답
+  * RAG 기반 CSV/메타데이터/전문가 코멘트 질의응답
   * Evidence 기반 구조화된 응답 제공
 
 * **시뮬레이션 및 확장성 (Simulation & Extensibility)**
@@ -133,67 +137,9 @@ flowchart TD
 ## 📚 기술 스택 (Tech Stack)
 
 * **Frontend (GUI):** PyQt5, PyVista
-* **Backend:** Python 3.11, FastAPI
-* **Database:** PostgreSQL 17, Chroma (VectorDB)
+* **Backend:** Python 3.11
+* **Database:** PostgreSQL 17, SQLite, Chroma (VectorDB)
 * **AI/LLM:** OpenAI API, LangChain
 * **Visualization:** Matplotlib, Plotly
-
----
-
-## 🛠 설치 및 실행 (Installation & Run)
-
-### 1. 환경 세팅
-
-```bash
-git clone https://github.com/xoguqrla/llm-pyqt-monitor.git
-cd llm-pyqt-monitor
-python -m venv LLMvenv
-source LLMvenv/Scripts/activate   # Windows
-# 또는
-source LLMvenv/bin/activate       # Linux/Mac
-```
-
-### 2. 패키지 설치
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. 실행
-
-```bash
-python -m app.main10_pdf_rag
-```
-
----
-
-## 🖼 스크린샷 (Screenshots)
-
-| 대시보드                                    | PDF RAG 분석                  | 3D 시각화                      |
-| --------------------------------------- | --------------------------- | --------------------------- |
-| ![dashboard](docs/images/dashboard.png) | ![rag](docs/images/rag.png) | ![sim](docs/images/sim.png) |
-
----
-
-## 🛤 향후 계획 (Roadmap)
-
-* [ ] 이상 탐지 알고리즘 고도화 (Isolation Forest, DBSCAN)
-* [ ] Digital Twin 연계 3D 시뮬레이션 자동화
-* [ ] 사용자 계정 및 권한 관리 추가
-* [ ] Docker 기반 배포 환경 제공
-
----
-
-## 🤝 기여 (Contributing)
-
-Pull Request 및 Issue 등록을 환영합니다.
-아이디어 제안, 버그 리포트, 기능 개선 의견 모두 환영합니다.
-
----
-
-## 📜 라이선스 (License)
-
-본 프로젝트는 MIT License 하에 배포됩니다.
-자세한 내용은 `LICENSE` 파일을 참고하세요.
 
 ---
