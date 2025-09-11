@@ -64,7 +64,7 @@
   },
   "KSS_85_System_variables_en.pdf:d9c7897b29": {
     "file_id": "KSS_85_System_variables_en.pdf:d9c7897b29",
-    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 자료\\KSS_85_System_variables_en.pdf",
+    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 \uc790\ub8cc\\KSS_85_System_variables_en.pdf",
     "sha256": "d9c7897b292c8d4565c3f899700af6fe1ed86288ec09b5c92520ef8f8731ffeb",
     "status": "indexed",
     "rows": 206,
@@ -73,7 +73,7 @@
   },
   "KSS_86_END_ko.pdf:f4a8206112": {
     "file_id": "KSS_86_END_ko.pdf:f4a8206112",
-    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 자료\\KSS_86_END_ko.pdf",
+    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 \uc790\ub8cc\\KSS_86_END_ko.pdf",
     "sha256": "f4a820611283030a607eeb3344afad288270c9bf89997f2d088c963820c5fa0f",
     "status": "indexed",
     "rows": 362,
@@ -82,7 +82,7 @@
   },
   "MA_KR_C4_GI_ko.pdf:1231ff05b5": {
     "file_id": "MA_KR_C4_GI_ko.pdf:1231ff05b5",
-    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 자료\\MA_KR_C4_GI_ko.pdf",
+    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 \uc790\ub8cc\\MA_KR_C4_GI_ko.pdf",
     "sha256": "1231ff05b5683244bdd0da1d05b4b490092ebb4c51eb9b9502202d6e89f2d4a1",
     "status": "indexed",
     "rows": 145,
@@ -91,7 +91,7 @@
   },
   "MA_KR_IONTEC_ko.pdf:c382467964": {
     "file_id": "MA_KR_IONTEC_ko.pdf:c382467964",
-    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 자료\\MA_KR_IONTEC_ko.pdf",
+    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 \uc790\ub8cc\\MA_KR_IONTEC_ko.pdf",
     "sha256": "c382467964007325c63d86d9c5d4e1bea09093aa002a0d8a88add9feb4b1a7c8",
     "status": "indexed",
     "rows": 330,
@@ -107,18 +107,9 @@
     "cols": 19,
     "updated_at": 1756281569.915927
   },
-  "130L_2_merged_data.csv:916e0f41c3": {
-    "file_id": "130L_2_merged_data.csv:916e0f41c3",
-    "path": "C:\\Users\\KAMIC\\Desktop\\20250205_130L_2차시도\\130L_2_merged_data.csv",
-    "sha256": "916e0f41c31b10c2f598aac68116e98ea779aa8bea59624cc78bb46a47bbb5a2",
-    "status": "indexed",
-    "rows": 2449196,
-    "cols": 22,
-    "updated_at": 1755848175.9612339
-  },
   "1_data.csv:eedcc34339": {
     "file_id": "1_data.csv:eedcc34339",
-    "path": "Z:\\KAMIC\\01.KAMIC_장비\\32. Laser-Wire DED\\21. 모니터링데이터\\DB\\20250224_Jisu_recorn_cont2(완)\\1_data.csv",
+    "path": "Z:\\KAMIC\\01.KAMIC_\uc7a5\ube44\\32. Laser-Wire DED\\21. \ubaa8\ub2c8\ud130\ub9c1\ub370\uc774\ud130\\DB\\20250224_Jisu_recorn_cont2(\uc644)\\1_data.csv",
     "sha256": "eedcc34339f371ddb26206affdba1d968ee410914b47de2e9baf9fd214c3a0f8",
     "status": "indexed",
     "rows": 10795,

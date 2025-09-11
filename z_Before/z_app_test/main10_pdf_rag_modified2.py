@@ -51,11 +51,11 @@ from core.rag_ops import (
 from core.llm_ops import build_llm, build_sql_chain, generate_sql_from_nlq
 from core.plotting import df_to_table, plot_df_line
 from core.files_registry import upsert_entry, load_registry
-from core.analysis_visualizer import AnalysisVisualizer
+from core2.analysis_visualizer import AnalysisVisualizer
 
 # --- pdf_store: 모듈이 없으면 폴백 함수 정의 ---
 try:
-    from core.pdf_store import (
+    from core2.pdf_store import (
     ensure_pdf_tables, insert_pdf, insert_chunks,
     list_chunk_ids_by_doc, fetch_chunks_by_ids, delete_doc, keyword_search_chunks,
     list_all_docs,   # ← 추가
@@ -820,23 +820,9 @@ class MainWindow(QWidget):
     # LLM 보조
     def build_prompt(self, question: str) -> str:
         full_question = question
-        # Include visualization context if present
         if self.viz_context:
             full_question = f"[Current Analysis Context]\n{self.viz_context}\n\n[User's Question]\n{question}"
             self.viz_context = None
-        # If there are any selected CSV files, prepend their names to the question context
-        try:
-            selected = self.get_selected_filenames()
-        except Exception:
-            selected = []
-        if selected:
-            try:
-                summary = self.get_selected_files_summary()
-            except Exception:
-                summary = ""
-            # Attach summary and list of selected filenames
-            selected_context = "[선택된 데이터 파일 요약]\n" + summary + "\n\n"
-            full_question = selected_context + full_question
         context = "".join(f"이전 Q: {q}\n이전 A: {a}\n" for q, a in self.history[-MAX_HISTORY_TURNS:])
         return context + f"질문: {full_question}"
 
@@ -1272,9 +1258,6 @@ class MainWindow(QWidget):
             elif any(k in query_lower for k in ["a*w", "aw"]):
                 # Notify that AW dashboard is only available in the viz tab
                 self.show_visualization('aw')
-            elif ("mpt" in query_lower or "m.p.t" in query_lower) and any(k in query_lower for k in ["시간", "time"]):
-                # Plot MPT vs Time if both keywords present
-                self.show_visualization('mpt_time')
             # If no advanced visualization was triggered, select the most appropriate results tab
             if not self._advanced_triggered:
                 # Prefer table view if a DataFrame result exists
@@ -1845,57 +1828,6 @@ class MainWindow(QWidget):
             self.inp.setFocus()
 
     # ------------------------------------------------------------------
-    # 선택된 CSV 파일 명단을 반환
-    def get_selected_filenames(self) -> List[str]:
-        """Return the list of filenames that are checked in the CSV lists."""
-        names: List[str] = []
-        # Newly added files
-        for i in range(self.csv_new_list.count() if hasattr(self, 'csv_new_list') else 0):
-            it = self.csv_new_list.item(i)
-            try:
-                if it and it.checkState() == Qt.Checked:
-                    names.append(it.data(Qt.UserRole) or it.text().split(' ')[0])
-            except Exception:
-                continue
-        # Saved files
-        for i in range(self.csv_saved_list.count() if hasattr(self, 'csv_saved_list') else 0):
-            it = self.csv_saved_list.item(i)
-            try:
-                if it and it.checkState() == Qt.Checked:
-                    names.append(it.data(Qt.UserRole) or it.text().split(' ')[0])
-            except Exception:
-                continue
-        return names
-
-    def get_selected_files_summary(self) -> str:
-        """
-        Build a human-readable summary of the selected CSV files using their
-        metadata (rows and columns) from the registry. If registry data is
-        unavailable, uses a placeholder.
-        """
-        names = self.get_selected_filenames()
-        if not names:
-            return ""
-        summary_lines: List[str] = []
-        try:
-            entries = load_registry()
-        except Exception:
-            entries = {}
-        for fname in names:
-            file_id = self.file_ids.get(fname)
-            rows = cols = None
-            if file_id and entries:
-                data = entries.get(file_id)
-                if data:
-                    rows = data.get("rows")
-                    cols = data.get("cols")
-            if rows is not None and cols is not None:
-                summary_lines.append(f"- {fname}: {rows}행 × {cols}열")
-            else:
-                summary_lines.append(f"- {fname}: (요약 정보 없음)")
-        return "\n".join(summary_lines)
-
-    # ------------------------------------------------------------------
     # 새로운 기능: 저장된 CSV 더블클릭으로 로딩
     def on_load_saved_csv(self, item):
         """
@@ -2058,7 +1990,6 @@ class MainWindow(QWidget):
           - '3d': 3D 경로 (정적)
           - 'simulation': 공정 시뮬레이션 (메시지로 안내)
           - 'aw': A*W 적층 부피 (메시지로 안내)
-          - 'mpt_time': 시간 대비 MPT 변화 그래프
           - other: 메시지로 안내
         """
         # Ensure there is a dataset to visualize
@@ -2087,46 +2018,6 @@ class MainWindow(QWidget):
                 ax = self.adv_fig.add_subplot(111)
                 ax.text(0.5, 0.5, "A*W 대시보드는 시각화 탭에서 실행할 수 있습니다.", ha='center', va='center')
                 ax.axis('off')
-            elif viz_type == 'mpt_time':
-                # Draw MPT vs Time line chart using relative time in seconds
-                if "time" not in self.current_df.columns or "MPT" not in self.current_df.columns:
-                    ax = self.adv_fig.add_subplot(111)
-                    ax.text(0.5, 0.5, "'time' 또는 'MPT' 컬럼이 없어 그래프를 그릴 수 없습니다.", ha='center', va='center')
-                    ax.axis('off')
-                else:
-                    # Parse time column with custom logic: treat last 3 digits as ms
-                    def parse_custom_time(s: str):
-                        if isinstance(s, str):
-                            parts = s.split('_')
-                            if len(parts) == 6 and len(parts[-1]) == 3 and parts[-1].isdigit():
-                                s_mod = '_'.join(parts[:-1] + [parts[-1] + '000'])
-                                try:
-                                    return pd.to_datetime(s_mod, format="%m_%d_%H_%M_%S_%f")
-                                except Exception:
-                                    pass
-                        try:
-                            return pd.to_datetime(s)
-                        except Exception:
-                            return pd.NaT
-                    t_series = self.current_df["time"].apply(parse_custom_time)
-                    # Drop invalid times
-                    valid_mask = t_series.notna()
-                    t_series = t_series[valid_mask]
-                    mpt_series = pd.to_numeric(self.current_df.loc[valid_mask, "MPT"], errors="coerce")
-                    # If less than 2 valid points, show message
-                    if len(t_series) < 2:
-                        ax = self.adv_fig.add_subplot(111)
-                        ax.text(0.5, 0.5, "유효한 시간 데이터가 충분하지 않습니다.", ha='center', va='center')
-                        ax.axis('off')
-                    else:
-                        # Compute elapsed seconds relative to start
-                        elapsed = (t_series - t_series.iloc[0]).dt.total_seconds()
-                        ax = self.adv_fig.add_subplot(111)
-                        ax.plot(elapsed, mpt_series, marker='o')
-                        ax.set_xlabel("경과 시간 (초)")
-                        ax.set_ylabel("MPT")
-                        ax.set_title("시간 대비 MPT 변화")
-                        ax.grid(True)
             else:
                 ax = self.adv_fig.add_subplot(111)
                 ax.text(0.5, 0.5, "해당 시각화는 지원되지 않습니다.", ha='center', va='center')

@@ -1,9 +1,10 @@
-# app/main9.py
-# 최종 업데이트 : 2025-08-13
-# PyQt5 기반 공정 데이터 LLM 분석기 (V3.0)
+# app/main9_3.py
+# 최종 업데이트 : 2025-08-19
+# PyQt5 기반 공정 데이터 LLM 분석기 (V3.1)
 # - PyVista 기반, 재생/일시정지/초기화 기능이 포함된 안정적인 시뮬레이터
 # - 폴리라인+RGBA 방식으로 렌더 최적화(렉 최소화)
 # - 색상 변수 선택(MPT/MPA/LOAD…) 및 통합 대시보드(3D+2D 동기화) 추가
+# - [신규] 6번: A*W(=MPA*MPW) 합성으로 “실시간 적층 두께/부피” 시뮬레이션(헤드 크기 스케일+누적 부피 곡선)
 
 from __future__ import annotations
 import sys, traceback, html
@@ -39,7 +40,7 @@ from core.llm_ops import build_llm, build_sql_chain, generate_sql_from_nlq
 from core.plotting import df_to_table, plot_df_line
 from core.files_registry import upsert_entry
 # ★ v2 셀렉터(analysis_visualizer.py)에서 버전 선택하도록 가져오기
-from core.analysis_visualizer import AnalysisVisualizer
+from core2.analysis_visualizer import AnalysisVisualizer
 
 # --- optional: metadata build & indexing scripts ---
 try:
@@ -237,7 +238,7 @@ class MainWindow(QWidget):
         self.repopulate_chat()
 
     def setupUi(self):
-        self.setWindowTitle("공정 데이터 LLM 분석기 V3.0 (PyVista)")
+        self.setWindowTitle("공정 데이터 LLM 분석기 V3.1 (PyVista)")
         self.resize(1700, 900)
 
         main_layout = QHBoxLayout(self)
@@ -301,6 +302,8 @@ class MainWindow(QWidget):
         self.btn_run_3d_path     = QPushButton("3. 3D 경로 (정적)");   self.btn_run_3d_path.setEnabled(False)
         self.btn_run_simulation  = QPushButton("4. 공정 시뮬레이션");   self.btn_run_simulation.setEnabled(False)
         self.btn_run_integrated  = QPushButton("5. 통합 대시보드");     self.btn_run_integrated.setEnabled(False)
+        # 신규 6번
+        self.btn_run_aw_volume   = QPushButton("6. A*W 적층두께/부피"); self.btn_run_aw_volume.setEnabled(False)
         self.btn_ask_llm_about_viz = QPushButton("🤖 이 분석에 대해 질문하기"); self.btn_ask_llm_about_viz.setEnabled(False)
 
         control_layout.addWidget(self.btn_load_csv_viz)
@@ -309,6 +312,7 @@ class MainWindow(QWidget):
         control_layout.addWidget(self.btn_run_3d_path)
         control_layout.addWidget(self.btn_run_simulation)
         control_layout.addWidget(self.btn_run_integrated)
+        control_layout.addWidget(self.btn_run_aw_volume)
         control_layout.addStretch(1)
 
         # 시뮬 제어 그룹
@@ -327,11 +331,11 @@ class MainWindow(QWidget):
         sim_layout.addWidget(self.speed_slider)
         sim_layout.addWidget(self.speed_value_label)
 
-        # 색상 변수 콤보
+        # 색상 변수 콤보 (신규: A*W 추가)
         sim_layout.addSpacing(20)
         self.color_label = QLabel("색상 변수:")
         self.color_by = QComboBox()
-        self.color_by.addItems(["MPT","MPA","MPW","LOAD","R_LP","R_WS"])
+        self.color_by.addItems(["MPT","MPA","MPW","LOAD","R_LP","R_WS","A*W(합성)"])
         self.color_by.setEnabled(False)
         sim_layout.addWidget(self.color_label)
         sim_layout.addWidget(self.color_by)
@@ -382,6 +386,7 @@ class MainWindow(QWidget):
         self.btn_run_3d_path.clicked.connect(self.run_3d_path_analysis)
         self.btn_run_simulation.clicked.connect(self.run_process_simulation)
         self.btn_run_integrated.clicked.connect(self.run_integrated_dashboard)
+        self.btn_run_aw_volume.clicked.connect(self.run_aw_volume_dashboard)  # 신규
         self.btn_ask_llm_about_viz.clicked.connect(self.ask_llm_about_viz)
         self.btn_toggle_playback.clicked.connect(self.toggle_simulation_playback)
         self.btn_reset_simulation.clicked.connect(self.reset_simulation)
@@ -600,6 +605,7 @@ class MainWindow(QWidget):
                 self.btn_run_3d_path.setEnabled(True)
                 self.btn_run_simulation.setEnabled(True)
                 self.btn_run_integrated.setEnabled(True)
+                self.btn_run_aw_volume.setEnabled(True)  # 신규
                 self.btn_ask_llm_about_viz.setEnabled(False)
             except Exception as e:
                 self.viz_fig.clear()
@@ -682,6 +688,33 @@ class MainWindow(QWidget):
             self.sim_controls_widget.hide()
             self.color_by.setEnabled(False)
 
+    # 신규: 6번 A*W 적층두께/부피 대시보드
+    def run_aw_volume_dashboard(self):
+        self._stop_simulation_if_running()
+        self.viz_stack.setCurrentIndex(2)  # 통합 뷰
+        self.sim_controls_widget.show()
+        if not self.visualizer:
+            return QMessageBox.warning(self, "Warning", "Please load a CSV file first.")
+        try:
+            self.sim_handles = self.visualizer.prepare_aw_volume_dashboard(self.pv_plotter_integrated, self.viz_fig_sync)
+            if self.sim_handles is None:
+                QMessageBox.information(self, "Info", "A*W 부피 계산에 필요한 컬럼이 부족합니다.")
+                self.viz_stack.setCurrentIndex(0); self.sim_controls_widget.hide()
+                self.color_by.setEnabled(False)
+                return
+            self.viz_canvas_sync.draw()
+            self.active_plotter = self.pv_plotter_integrated
+            self.reset_simulation()
+            self.viz_context = "A*W fused dashboard with real-time bead thickness/volume."
+            self.btn_ask_llm_about_viz.setEnabled(True)
+            self.color_by.setEnabled(True)
+        except Exception as e:
+            QMessageBox.critical(self, "AW Dashboard Error", str(e))
+            print(traceback.format_exc())
+            self.viz_stack.setCurrentIndex(0)
+            self.sim_controls_widget.hide()
+            self.color_by.setEnabled(False)
+
     def toggle_simulation_playback(self):
         if self.simulation_timer.isActive():
             self.simulation_timer.stop()
@@ -701,6 +734,13 @@ class MainWindow(QWidget):
             self.sim_handles["rgba_current"] = cur
             self.sim_handles["path_poly"]["RGBA"] = cur
             self.sim_handles["head_actor"].SetPosition(self.sim_handles["points"][0])
+            # 헤드 스케일 초기화(A*W 모드일 경우)
+            if "aw_norm" in self.sim_handles:
+                try:
+                    s = float(self.sim_handles.get("head_scale_min", 0.6))
+                    self.sim_handles["head_actor"].SetScale(s)
+                except Exception:
+                    pass
             if self.active_plotter:
                 self.active_plotter.render()
 
@@ -723,31 +763,47 @@ class MainWindow(QWidget):
         # 헤드 이동
         self.sim_handles["head_actor"].SetPosition(self.sim_handles["points"][i])
 
+        # (신규) A*W 모드면 헤드 크기 스케일로 "두께" 힌트 제공
+        if "aw_norm" in self.sim_handles:
+            aw_norm = self.sim_handles["aw_norm"]
+            smin = float(self.sim_handles.get("head_scale_min", 0.6))
+            smax = float(self.sim_handles.get("head_scale_max", 2.2))
+            scale = smin + (smax - smin) * float(aw_norm[i])
+            try:
+                self.sim_handles["head_actor"].SetScale(scale)
+            except Exception:
+                pass
+
         # 3D 렌더
         if getattr(self, "active_plotter", None):
             self.active_plotter.render()
 
-        # 2D 커서 동기(통합 대시보드일 때)
+        # 2D 커서 동기(통합 대시보드일 때) + 부피 텍스트
         vlines = self.sim_handles.get("vlines")
         if vlines:
-            # 시간축 우선: time_vec -> sim_df['time'] -> 프레임 인덱스
             tvec = self.sim_handles.get("time_vec")
             if tvec is not None:
                 x_val = tvec[i]
             elif "time" in sim_df.columns:
                 x_val = sim_df["time"].iloc[i]
             else:
-                x_val = i  # fallback
+                x_val = i
 
             for v in vlines.values():
-                # 핵심 수정: 스칼라가 아니라 [x, x] 시퀀스로 전달
                 v.set_xdata([x_val, x_val])
 
-            fig = self.sim_handles.get("mpl_fig")
-            if fig is not None and getattr(fig, "canvas", None):
-                fig.canvas.draw_idle()
-            elif hasattr(self, "viz_canvas_sync"):
-                self.viz_canvas_sync.draw_idle()
+            # (신규) 누적 부피 표시
+            if "cumV_vec" in self.sim_handles:
+                cumV = float(self.sim_handles["cumV_vec"][i])
+                ax_bottom = self.sim_handles.get("ax_cumv")
+                if ax_bottom is not None:
+                    # 축 제목에 현재값 표기(가벼운 방법)
+                    ax_bottom.set_title(f'Cumulative Volume (est.): {cumV:.3f}  [unit^3]', fontsize=10)
+                fig = self.sim_handles.get("mpl_fig")
+                if fig is not None and getattr(fig, "canvas", None):
+                    fig.canvas.draw_idle()
+                elif hasattr(self, "viz_canvas_sync"):
+                    self.viz_canvas_sync.draw_idle()
 
         # 다음 틱 간격(최소 15ms)
         if i + 1 < len(sim_df):
@@ -763,14 +819,15 @@ class MainWindow(QWidget):
 
         self.sim_frame_index += 1
 
-
     # 색상 변수 변경(MPT/MPA/LOAD 등)
     def on_change_color_by(self, name: str):
         if not self.visualizer or not self.sim_handles:
             return
+        # UI 표기 "A*W(합성)" → 내부 키 "A*W" 로 정규화
+        key = "A*W" if name.startswith("A*W") else name
         ok = False
         try:
-            ok = self.visualizer.recolor_simulation(self.sim_handles, color_by=name)
+            ok = self.visualizer.recolor_simulation(self.sim_handles, color_by=key)
         except Exception as e:
             print("[recolor_simulation error]", e)
         if not ok:

@@ -3,7 +3,9 @@
 # PyQt5 기반 공정 데이터 LLM 분석기 (V4.0)
 # - V3.1 기능 전체 포함
 # - [신규] 3번째 탭: PDF 문서 대상 RAG 챗봇 기능 추가
-# - 문서 전용 벡터DB 분리(vector_db_dir/docs), 드래그&드롭/진행률/취소, 삭제, Evidence 패널
+# - 문서 전용 벡터DB 분리(vector_db_dir/docs), 드래그&드롭/진행률/취소, 삭제, Evidence/Images 패널
+# - PDF 텍스트를 DB에 저장 후, DB에서 정확 텍스트를 꺼내 컨텍스트 구성 (벡터 검색 + LIKE 백업)
+# - LLM 기반 CSV 분석 답변도 섹션/불릿으로 구조화해 깔끔하게 출력
 
 from __future__ import annotations
 import sys, traceback, html
@@ -20,15 +22,22 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
     QFileDialog, QTableWidget, QLineEdit, QListWidget, QListWidgetItem,
     QTextEdit, QTabWidget, QComboBox, QHeaderView, QMessageBox, QFrame,
-    QProgressDialog, QScrollArea, QSizePolicy, QSpacerItem, QSlider, QStackedWidget
+    QProgressDialog, QScrollArea, QSizePolicy, QSpacerItem, QSlider, QStackedWidget,
+    QSplitter
 )
+from PyQt5.QtGui import QPixmap
+
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import matplotlib.pyplot as plt
 from pyvistaqt import QtInteractor
 
 # --- PDF RAG 기능 추가에 필요한 라이브러리 ---
-from pypdf import PdfReader
+try:
+    import fitz  # PyMuPDF (텍스트+이미지 추출 고품질)
+except Exception:
+    fitz = None
+from pypdf import PdfReader  # 폴백 텍스트 추출
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # --- core modules ---
@@ -41,8 +50,97 @@ from core.rag_ops import (
 )
 from core.llm_ops import build_llm, build_sql_chain, generate_sql_from_nlq
 from core.plotting import df_to_table, plot_df_line
-from core.files_registry import upsert_entry
-from core.analysis_visualizer import AnalysisVisualizer
+from core.files_registry import upsert_entry, load_registry
+from core2.analysis_visualizer import AnalysisVisualizer
+
+# --- pdf_store: 모듈이 없으면 폴백 함수 정의 ---
+try:
+    from core2.pdf_store import (
+    ensure_pdf_tables, insert_pdf, insert_chunks,
+    list_chunk_ids_by_doc, fetch_chunks_by_ids, delete_doc, keyword_search_chunks,
+    list_all_docs,   # ← 추가
+)
+
+except Exception:
+    # 폴백: 이 파일 하나만으로 동작하도록 최소 구현
+    def ensure_pdf_tables(engine) -> None:
+        DDL_DOCS = """
+        CREATE TABLE IF NOT EXISTS pdf_docs(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          filename TEXT UNIQUE,
+          pages INTEGER,
+          created_at TEXT
+        );
+        """
+        DDL_CHUNKS = """
+        CREATE TABLE IF NOT EXISTS pdf_chunks(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          doc_id INTEGER NOT NULL,
+          page INTEGER NOT NULL,
+          chunk_index INTEGER NOT NULL,
+          text TEXT NOT NULL,
+          token_len INTEGER,
+          FOREIGN KEY (doc_id) REFERENCES pdf_docs(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pdf_chunks_doc ON pdf_chunks(doc_id);
+        CREATE INDEX IF NOT EXISTS idx_pdf_chunks_page ON pdf_chunks(page);
+        CREATE INDEX IF NOT EXISTS idx_pdf_chunks_text ON pdf_chunks(text);
+        """
+        with engine.begin() as c:
+            c.exec_driver_sql(DDL_DOCS)
+            c.exec_driver_sql(DDL_CHUNKS)
+
+    def insert_pdf(engine, filename: str, pages: int) -> int:
+        from datetime import datetime
+        with engine.begin() as c:
+            c.exec_driver_sql(
+                "INSERT OR IGNORE INTO pdf_docs(filename,pages,created_at) VALUES(?,?,?)",
+                (filename, pages, datetime.utcnow().isoformat()),
+            )
+            row = c.exec_driver_sql("SELECT id FROM pdf_docs WHERE filename=?", (filename,)).first()
+        return int(row[0])
+
+    def insert_chunks(engine, doc_id: int, rows: List[Tuple[int,int,str]]) -> List[int]:
+        ids: List[int] = []
+        with engine.begin() as c:
+            for page, idx, text in rows:
+                c.exec_driver_sql(
+                    "INSERT INTO pdf_chunks(doc_id,page,chunk_index,text,token_len) VALUES(?,?,?,?,?)",
+                    (doc_id, page, idx, text, len(text)),
+                )
+                rid = c.exec_driver_sql("SELECT last_insert_rowid()").scalar()
+                ids.append(int(rid))
+        return ids
+
+    def list_chunk_ids_by_doc(engine, doc_id: int) -> List[int]:
+        with engine.begin() as c:
+            rows = c.exec_driver_sql("SELECT id FROM pdf_chunks WHERE doc_id=? ORDER BY id", (doc_id,)).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def fetch_chunks_by_ids(engine, ids: List[int]) -> List[str]:
+        if not ids: return []
+        qmarks = ",".join("?" for _ in ids)
+        with engine.begin() as c:
+            rows = c.exec_driver_sql(f"SELECT id, text FROM pdf_chunks WHERE id IN ({qmarks})", tuple(ids)).fetchall()
+        m = {int(i): t for i, t in rows}
+        return [m.get(i, "") for i in ids]
+
+    def delete_doc(engine, doc_id: int) -> None:
+        with engine.begin() as c:
+            c.exec_driver_sql("DELETE FROM pdf_chunks WHERE doc_id=?", (doc_id,))
+            c.exec_driver_sql("DELETE FROM pdf_docs   WHERE id=?", (doc_id,))
+
+    def keyword_search_chunks(engine, query: str, limit: int = 6):
+        import re
+        tokens = [t for t in re.findall(r"[A-Za-z0-9가-힣]{2,}", query) if len(t) >= 2][:5]
+        if not tokens:
+            tokens = [query.strip()][:1]
+        like = " OR ".join(["text LIKE ?"] * len(tokens))
+        params = [f"%{t}%" for t in tokens]
+        sql = f"SELECT id, text FROM pdf_chunks WHERE {like} ORDER BY token_len LIMIT {limit}"
+        with engine.begin() as c:
+            rows = c.exec_driver_sql(sql, tuple(params)).fetchall()
+        return [(int(r[0]), r[1]) for r in rows]
 
 # --- optional: metadata build & indexing scripts ---
 try:
@@ -80,7 +178,6 @@ class Worker(QObject):
 
     def run(self):
         try:
-            # kw에 progress_callback 키가 있으면 signal.emit로 치환
             if "progress_callback" in self.kw:
                 self.kw["progress_callback"] = self.progress.emit
             self.finished.emit(self.fn(*self.a, **self.kw), None)
@@ -200,7 +297,8 @@ class ChatView(QScrollArea):
             self._scroll_to_bottom_later()
         return super().eventFilter(obj, event)
 
-# ---------------- LLM prompt helpers (fixed & balanced) ----------------
+
+# ---------------- LLM prompt helpers (CSV/DB용, PDF용) ----------------
 def _tone_style(tone: str) -> str:
     return (
         "말투는 친근하고 공감 있게, 군더더기 없이 자연스럽게."
@@ -210,10 +308,10 @@ def _tone_style(tone: str) -> str:
 
 def llm_final_only(llm, question: str, df_snip: str, meta_snip: str, tone: str) -> str:
     """
-    균형 버전:
-    - 자료가 '전혀' 없을 때만 불가 문구를 출력.
-    - 표/메타가 '조금이라도' 있으면 반드시 한 단락(3~5문장)으로 요약→근거→해석→한계 순서로 답함.
-    - 영어 문서를 읽어도 출력은 항상 한국어. 기술 용어/약어/단위/코드는 원문 보존, 최초 1회 (원문) 병기 권장.
+    CSV/DB(+메타) 기반 질의의 구조화 응답.
+    - 자료가 전혀 없을 때만 간단한 불가 사유.
+    - 표/메타가 조금이라도 있으면 [요약/핵심 결과/간단 해석/제한/추천 후속] 섹션으로 출력.
+    - 영어 데이터라도 생각은 영어로, 출력은 항상 한국어. 용어/약어/코드/단위는 원문 보존(최초 1회 (원문) 병기 권장).
     """
     has_any = bool(df_snip and df_snip.strip()) or bool(meta_snip and meta_snip.strip())
     if not has_any:
@@ -224,22 +322,26 @@ def llm_final_only(llm, question: str, df_snip: str, meta_snip: str, tone: str) 
         "언어 규칙:\n"
         "- 데이터/문서가 영어여도 이해·추론은 영어 맥락을 보존하되, 최종 출력은 반드시 한국어로 작성한다.\n"
         "- 기술 용어·제품명·약어·코드·단위·수치는 원문을 보존하고, 최초 1회만 한국어 뒤에 (원문)을 병기한다.\n"
-        "출력 규칙(데이터가 일부라도 있으면 반드시 따름):\n"
-        "- 한 단락(3~5문장)으로 구성하고, 다음 흐름을 포함한다: 요약 → 핵심 근거(수치/항목 언급) → 짧은 해석 → 마지막 문장에 제한/가정.\n"
-        "- 제목/불릿/섹션/이모지/Markdown 금지.\n\n"
+        "출력 형식(아래 템플릿 그대로):\n"
+        "[요약]\n"
+        "• 질문에 대한 핵심 결론을 1~2문장으로.\n\n"
+        "[핵심 결과]\n"
+        "• 표/통계에서 직접 관찰 가능한 결과 3~5개(수치/범위/추세 언급).\n\n"
+        "[간단 해석]\n"
+        "1. 결과가 의미하는 바를 한 문장씩 2~3개.\n\n"
+        "[제한/주의]\n"
+        "• 데이터 품질/가정/범위의 제약을 1~3개.\n\n"
+        "[추천 후속 분석]\n"
+        "• 바로 실행 가능한 다음 단계 2~3개.\n\n"
+        "규칙: 섹션 제목과 불릿/번호만 사용. HTML/Markdown/이모지 금지. 제공 자료 밖의 추정 금지.\n\n"
         f"[질문]\n{question}\n\n"
         f"[SQL 미리보기(표 일부)]\n{df_snip or '(없음)'}\n\n"
-        f"[메타 요약 일부]\n{meta_snip or '(없음)'}\n\n"
-        "출력: 위 규칙을 따르는 한국어 한 단락."
+        f"[메타 요약 일부]\n{meta_snip or '(없음)'}\n"
     )
     return llm.invoke(prompt).content
 
 def llm_checks_only(llm, question: str, df_snip: str, meta_snip: str) -> str:
-    """
-    체크리스트는 너무 보수적으로 막지 않고, 항상 3~6개를 제안.
-    - 영어 문서라도 출력은 한국어, 용어/단위는 원문 유지(최초 1회 (원문) 병기).
-    - 실행 가능하고 구체적으로.
-    """
+    """실무 점검 체크리스트(3~6개, 불릿만)."""
     prompt = (
         "역할: 제조 공정 데이터 분석 점검관.\n"
         "언어 규칙:\n"
@@ -247,105 +349,42 @@ def llm_checks_only(llm, question: str, df_snip: str, meta_snip: str) -> str:
         "- 기술 용어·제품명·약어·코드·단위·수치는 원문을 보존하고, 최초 1회만 한국어 뒤 (원문)을 병기한다.\n"
         "출력 규칙:\n"
         "- 하이픈('- ') 불릿 리스트로 3~6개 항목을 제시한다. 머리말/제목/이모지/Markdown 금지.\n"
-        "- 각 항목은 1~2문장, 데이터/메타에 기반한 실행 가능한 검증 방법을 제안한다.\n\n"
+        "- 각 항목은 1~2문장, 데이터/메타를 근거로 실행 가능한 검증 방법을 제안한다.\n\n"
         f"[질문]\n{question}\n\n"
         f"[SQL 미리보기(표 일부)]\n{df_snip or '(없음)'}\n\n"
         f"[메타 요약 일부]\n{meta_snip or '(없음)'}\n\n"
-        "출력 예시 형식:\n"
         "- …\n- …\n- …"
     )
     return llm.invoke(prompt).content
 
-
-# main10_pdf_rag.py 파일에서 이 함수를 찾아 통째로 교체하세요.
-
-# --- 신규: PDF RAG 답변 생성을 위한 LLM 프롬프트 헬퍼 (개선 버전) ---
 def llm_pdf_rag_answer(llm, question: str, context: str) -> str:
     """
-    요약과 상세 설명을 명확히 분리하고, 구조화된 답변을 생성하는 프롬프트.
-    - [요약]: 질문에 대한 가장 핵심적인 결론을 1~2 문장으로 압축.
-    - [상세 설명]: 핵심 포인트를 바탕으로 컨텍스트를 인용하여 구체적으로 서술.
-    - 출처는 컨텍스트에 포함된 '[출처: 파일명 | p.N]' 패턴을 수집하여 정리.
+    PDF RAG 구조화 응답(영문 문서도 고려): [요약/상세 설명/관련 정보·제한/출처]
+    - 최종 출력은 한국어, 용어·약어·단위·코드는 원문 보존(최초 1회 (원문) 병기 권장)
+    - 컨텍스트의 '[파일명 | p.N]' 라인에서 출처를 수집해 중복 제거
     """
     prompt = (
-        "역할: 당신은 기술 문서를 기반으로 질문에 답변하는 전문 분석가입니다.\n"
+        "역할: 기술 문서를 기반으로 질문에 답변하는 전문 분석가.\n"
         "언어 규칙:\n"
-        "1. 최종 답변은 반드시 한국어로 작성해야 합니다.\n"
-        "2. 기술 용어, 제품명, 코드, 단위 등은 번역하지 말고 원문을 그대로 사용하세요.\n"
-        "3. 용어가 처음 나올 때만 '한국어 설명 (원문)' 형식으로 표기하고, 이후에는 한국어나 약어만 사용하세요.\n"
-        "출력 규칙:\n"
-        "1. 반드시 아래에 명시된 템플릿 구조와 섹션 제목([요약], [상세 설명] 등)을 정확히 따라야 합니다.\n"
-        "2. 각 섹션의 지시사항을 철저히 이행하여 내용을 작성해야 합니다.\n"
-        "3. 컨텍스트에 근거가 없는 내용은 절대로 추측해서 작성하지 마세요.\n"
-        "4. 컨텍스트 각 부분의 끝에 있는 '[출처: 파일명 | p.페이지]'를 수집하여 [출처] 섹션에 중복 없이 기입하세요.\n\n"
-        "--- 템플릿 및 섹션별 지시사항 ---\n"
+        "1) 문서는 영어일 수 있으나, 이해/추론은 원문 맥락으로 유지하고 최종 출력은 반드시 한국어로 작성한다.\n"
+        "2) 기술 용어·제품명·약어·코드·단위·수치는 번역하지 말고 원문을 보존한다(최초 1회 한국어 뒤 (원문) 병기 권장).\n"
+        "3) 컨텍스트에 없는 내용은 적지 않는다.\n"
+        "출력 템플릿(그대로 사용):\n"
         "[요약]\n"
-        "# 지시: 질문에 대한 가장 핵심적인 결론을 1~2 문장으로 간결하게 압축하여 여기에 작성하세요.\n\n"
-        
+        "…한 줄 요약…\n\n"
         "[상세 설명]\n"
-        "# 지시: 위 요약 내용을 뒷받침하는 구체적인 근거를 컨텍스트에서 찾아 2~4개의 핵심 항목으로 나누어 상세하게 설명하세요. 각 항목은 번호(1., 2., ...)를 붙이고, 관련된 컨텍스트 내용을 직접 인용하여 논리적으로 서술하세요.\n"
-        "1. (첫 번째 핵심 설명)\n"
-        "2. (두 번째 핵심 설명)\n\n"
-
+        "1. …\n"
+        "2. …\n"
+        "3. …\n\n"
         "[관련 정보 / 제한 사항]\n"
-        "# 지시: 질문과 직접적인 관련은 없지만 알아두면 좋은 추가 정보나, 컨텍스트에서 언급된 한계점/주의사항을 불릿(•)으로 간략히 정리하세요. 내용이 없다면 '해당 없음'이라고 작성하세요.\n"
-        "• \n\n"
-
+        "• …  (없으면 '해당 없음')\n\n"
         "[출처]\n"
-        "# 지시: 답변의 근거가 된 컨텍스트의 '[출처: ...]' 부분을 모두 수집하여 중복을 제거한 후, 불릿(•)으로 여기에 나열하세요.\n"
-        "• \n"
-        "-------------------------------------\n\n"
+        "• 파일명 | p.N\n"
+        "• 파일명 | p.N\n\n"
         f"[사용자 질문]\n{question}\n\n"
         f"[참고 문서 내용 (컨텍스트)]\n{context}\n"
     )
     return llm.invoke(prompt).content
-
-
-# # --- 신규: PDF RAG 답변 생성을 위한 LLM 프롬프트 헬퍼 ---
-# def llm_pdf_rag_answer(llm, question: str, context: str) -> str:
-#     """
-#     다국어 문서를 읽되(영문은 영문 그대로 이해/추론), 결과는 항상 한국어로 구조화.
-#     - 기술 용어/제품명/약어/코드/단위는 원문 유지.
-#     - 최초 1회만 한국어 뒤에 (원문) 병기. 예) 산업용 로봇 컨트롤러(KUKA System Software, KSS)
-#     - HTML/Markdown/이모지 금지(현재 UI 라벨은 순수 텍스트가 가장 깔끔함).
-#     - 섹션/불릿/번호 형식을 강제하여 가독성 향상.
-#     - 컨텍스트에 근거 없으면 요약 섹션에 불가 문구만.
-#     - 출처는 컨텍스트에 포함된 [파일명 | p.N] 패턴을 모아 중복 제거(최대 6개).
-#     """
-#     prompt = (
-#         "역할: 기술 문서를 근거로 한국어 요약을 생성하는 분석 보조자.\n"
-#         "언어 규칙:\n"
-#         "- 문서가 영어여도 내용 이해와 추론은 영어 맥락을 유지하라. 하지만 최종 출력은 반드시 한국어로 작성한다.\n"
-#         "- 기술 용어/제품명/약어/코드/파일명/단위/수치는 원문을 보존한다.\n"
-#         "- 용어의 최초 등장 시에만 한국어 설명 뒤에 (원문)을 병기한다. 이후에는 한국어 또는 약어만 사용해도 된다.\n"
-#         "- 코드/식별자/에러메시지는 번역하지 말고 원문 그대로 둔다.\n"
-#         "출력 형식 규칙:\n"
-#         "- HTML/Markdown/이모지 사용 금지. 섹션 제목과 불릿/번호만 사용.\n"
-#         "- 각 불릿은 1~2문장, 군더더기 없이 간결하게.\n"
-#         "- 컨텍스트에 없는 내용은 쓰지 말고, 없으면 '제공된 문서 내용으로는 답변할 수 없습니다.'라고만 적는다.\n"
-#         "- 컨텍스트에 포함된 '[파일명 | p.N]' 표식을 찾아 출처 목록을 만들고 중복을 제거한다(최대 6개).\n\n"
-#         "반드시 아래 템플릿을 그대로 따를 것:\n"
-#         "[요약]\n"
-#         "…한 줄 요약…\n\n"
-#         "[핵심 포인트]\n"
-#         "• …\n"
-#         "• …\n"
-#         "• …\n\n"
-#         "[세부 설명]\n"
-#         "1) …\n"
-#         "2) …\n"
-#         "3) …\n\n"
-#         "[주의/제한]\n"
-#         "• …  (없으면 '해당 문맥에서 명확히 언급되지 않음')\n\n"
-#         "[출처]\n"
-#         "• 파일명 | p.N\n"
-#         "• 파일명 | p.N\n\n"
-#         f"[질문]\n{question}\n\n"
-#         f"[컨텍스트]\n{context}\n"
-#     )
-#     return llm.invoke(prompt).content
-
-
 
 
 # ---------------- main window ----------------
@@ -366,8 +405,9 @@ class MainWindow(QWidget):
 
         # PDF RAG 상태
         self.pdf_rag_history: List[Tuple[str, str]] = []
-        self.pdf_rag_files = {}          # {filename: file_id}
+        self.pdf_rag_files = {}          # {filename: doc_id}
         self.pdf_chunk_counts = {}       # {filename: n_chunks}
+        self.pdf_images_map = {}         # {filename: [image_path, ...]}
 
         self.setupUi()
         self.init_backend()
@@ -398,36 +438,90 @@ class MainWindow(QWidget):
         self.last_df, self.df_viz = None, None
         self.visualizer, self.viz_context = None, None
 
+    # app/main10_pdf_rag.py 파일에서 이 함수를 찾아 통째로 교체하세요.
+
+# app/main10_pdf_rag.py 파일에서 이 함수를 찾아 통째로 교체하세요.
+
     def setup_llm_tab(self):
         layout = QHBoxLayout(self.llm_tab)
         left, center, right = QVBoxLayout(), QVBoxLayout(), QVBoxLayout()
-        layout.addLayout(left, 2); layout.addLayout(center, 5); layout.addLayout(right, 3)
+        layout.addLayout(left, 2)
+        layout.addLayout(center, 6)
+        layout.addLayout(right, 4)
 
+        # ============== 좌측: 파일 관리 (PDF 탭과 동일한 구조로 변경) ==============
         left.addWidget(QLabel("📁 소스 파일 (RAG 및 SQL 대상)"))
-        self.drop = DropArea(file_type="CSV"); self.drop.filesDropped.connect(self.handle_csv_paths); left.addWidget(self.drop)
-        self.btn_upload = QPushButton("CSV 업로드"); self.btn_upload.clicked.connect(self.on_upload); left.addWidget(self.btn_upload)
-        left.addWidget(QLabel("저장된 파일"))
-        self.file_list = QListWidget(); left.addWidget(self.file_list, 1)
-        self.btn_del = QPushButton("선택 삭제"); self.btn_del.clicked.connect(self.on_delete_files); left.addWidget(self.btn_del)
 
+        # (위) 새로 추가 섹션
+        box_new = QFrame(); box_new.setFrameShape(QFrame.StyledPanel)
+        ln = QVBoxLayout(box_new); ln.setContentsMargins(8,8,8,8)
+        title_new = QLabel("➕ 새로 추가(이번 세션)")
+        title_new.setStyleSheet("font-weight:600;")
+        ln.addWidget(title_new)
+
+        self.drop_csv = DropArea(file_type="csv")
+        self.drop_csv.filesDropped.connect(self.handle_csv_paths)
+        ln.addWidget(self.drop_csv)
+
+        btn_row_new = QHBoxLayout()
+        self.btn_upload_csv = QPushButton("파일 선택…")
+        self.btn_upload_csv.clicked.connect(self.on_upload)
+        self.btn_del_csv_new = QPushButton("선택 삭제")
+        self.btn_del_csv_new.clicked.connect(lambda: self.on_delete_files(target="new"))
+        btn_row_new.addWidget(self.btn_upload_csv)
+        btn_row_new.addStretch(1)
+        btn_row_new.addWidget(self.btn_del_csv_new)
+        ln.addLayout(btn_row_new)
+
+        self.csv_new_list = QListWidget() # <-- 에러가 발생했던 'csv_new_list'가 여기서 생성됩니다.
+        self.csv_new_list.setToolTip("이번 세션에서 추가한 CSV 파일 목록")
+        ln.addWidget(self.csv_new_list, 1)
+        left.addWidget(box_new)
+
+        # (아래) 저장됨 섹션
+        box_saved = QFrame(); box_saved.setFrameShape(QFrame.StyledPanel)
+        ls = QVBoxLayout(box_saved); ls.setContentsMargins(8,8,8,8)
+        title_saved = QLabel("📚 저장된 파일(로컬 DB)")
+        title_saved.setStyleSheet("font-weight:600;")
+        ls.addWidget(title_saved)
+
+        btn_row_saved = QHBoxLayout()
+        self.btn_refresh_csv_saved = QPushButton("새로고침")
+        self.btn_refresh_csv_saved.clicked.connect(self.refresh_csv_saved_list)
+        self.btn_del_csv_saved = QPushButton("선택 삭제")
+        self.btn_del_csv_saved.clicked.connect(lambda: self.on_delete_files(target="saved"))
+        btn_row_saved.addWidget(self.btn_refresh_csv_saved)
+        btn_row_saved.addStretch(1)
+        btn_row_saved.addWidget(self.btn_del_csv_saved)
+        ls.addLayout(btn_row_saved)
+
+        self.csv_saved_list = QListWidget() # <-- 저장된 파일 목록 위젯
+        self.csv_saved_list.setToolTip("DB에 저장된 모든 CSV 파일")
+        ls.addWidget(self.csv_saved_list, 1)
+        left.addWidget(box_saved, 1)
+
+        # ============== 중앙: 채팅 ==============
         center.addWidget(QLabel("💬 LLM 질의"))
         tone_row = QHBoxLayout(); tone_row.addWidget(QLabel("톤"))
         self.tone = QComboBox(); self.tone.addItems(["전문", "친근"]); tone_row.addWidget(self.tone)
         tone_row.addStretch(1); center.addLayout(tone_row)
         self.chat = ChatView(); center.addWidget(self.chat, 1)
         self.btn_clear_history = QPushButton("채팅 로그 초기화"); self.btn_clear_history.clicked.connect(self.on_clear_history); center.addWidget(self.btn_clear_history)
-        send_row = QHBoxLayout()
-        self.inp = QLineEdit(); self.inp.setPlaceholderText("질문을 입력하고 Enter…"); self.inp.returnPressed.connect(self.on_ask)
+        send_row = QHBoxLayout(); self.inp = QLineEdit(); self.inp.setPlaceholderText("질문을 입력하고 Enter…"); self.inp.returnPressed.connect(self.on_ask)
         self.btn_send = QPushButton("▶"); self.btn_send.clicked.connect(self.on_ask); self.status = QLabel("")
         send_row.addWidget(self.inp, 1); send_row.addWidget(self.btn_send); send_row.addWidget(self.status)
         center.addLayout(send_row)
 
+        # ============== 우측: 결과 ==============
         right.addWidget(QLabel("📊 LLM 결과/리포트"))
         self.tabs = QTabWidget(); right.addWidget(self.tabs, 1)
         self.tbl = QTableWidget(); self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); self.tabs.addTab(self.tbl, "표(Table)")
         self.fig, self.ax = plt.subplots(); self.canvas = FigureCanvas(self.fig); self.tabs.addTab(self.canvas, "그래프(Chart)")
         self.evidence = QTextEdit(); self.evidence.setReadOnly(True); self.tabs.addTab(self.evidence, "근거(Evidence)")
         self.report = QTextEdit(); self.report.setReadOnly(True); self.tabs.addTab(self.report, "보고서(Report)")
+
+        # 시작 시 저장된 CSV 목록 채우기
+        QTimer.singleShot(0, self.refresh_csv_saved_list) 
 
     def setup_viz_tab(self):
         layout = QVBoxLayout(self.viz_tab)
@@ -532,59 +626,119 @@ class MainWindow(QWidget):
         self.btn_reset_simulation.clicked.connect(self.reset_simulation)
         self.color_by.currentTextChanged.connect(self.on_change_color_by)
 
+
+    def refresh_pdf_saved_list(self):
+        """DB에 저장된 PDF 목록을 아래 리스트에 반영."""
+        try:
+            docs = list_all_docs(self.engine)  # [(doc_id, filename, pages, created_at), ...]
+        except Exception as e:
+            QMessageBox.critical(self, "목록 갱신 오류", str(e))
+            return
+
+        # 맵 업데이트
+        self.pdf_rag_files = {}  # {filename: doc_id}
+        self.pdf_saved_list.clear()
+        for doc_id, fname, pages, _ts in docs:
+            self.pdf_rag_files[fname] = doc_id
+            it = QListWidgetItem(f"{fname}   (p.{pages})")
+            it.setData(Qt.UserRole, fname)  # 표시명과 실명 분리
+            it.setCheckState(Qt.Unchecked)
+            self.pdf_saved_list.addItem(it)
+
+
     # --- 신규: PDF RAG 챗봇 탭 UI 설정 ---
+
+
+
+
+
     def setup_pdf_tab(self):
         layout = QHBoxLayout(self.pdf_tab)
         left = QVBoxLayout()
         right = QVBoxLayout()
         layout.addLayout(left, 2)
-        layout.addLayout(right, 8)
+        layout.addLayout(right, 10)
 
-        # 좌측: 파일 관리
-        left.addWidget(QLabel("📂 PDF 문서 라이브러리"))
+        # ============== 좌측: 파일 관리 ==============
+        left.addWidget(QLabel("📂 PDF 문서 관리"))
 
-        # 드래그&드롭
+        # (위) 새로 추가 섹션
+        box_new = QFrame(); box_new.setFrameShape(QFrame.StyledPanel)
+        ln = QVBoxLayout(box_new); ln.setContentsMargins(8,8,8,8)
+        title_new = QLabel("➕ 새로 추가(이번 세션)")
+        title_new.setStyleSheet("font-weight:600;")
+        ln.addWidget(title_new)
+
         self.drop_pdf = DropArea(file_type="pdf")
+        self.drop_pdf.setMinimumHeight(90)      # 드롭영역 높이 축소
         self.drop_pdf.filesDropped.connect(self.handle_pdf_paths)
-        left.addWidget(self.drop_pdf)
+        ln.addWidget(self.drop_pdf)
 
-        # 업로드/삭제
-        self.btn_upload_pdf = QPushButton("PDF 업로드")
+        btn_row_new = QHBoxLayout()
+        self.btn_upload_pdf = QPushButton("파일 선택…")
         self.btn_upload_pdf.clicked.connect(self.on_upload_pdf)
-        left.addWidget(self.btn_upload_pdf)
+        self.btn_del_pdf_new = QPushButton("선택 삭제")
+        self.btn_del_pdf_new.clicked.connect(lambda: self.on_delete_pdf(target="new"))
+        btn_row_new.addWidget(self.btn_upload_pdf)
+        btn_row_new.addStretch(1)
+        btn_row_new.addWidget(self.btn_del_pdf_new)
+        ln.addLayout(btn_row_new)
 
-        self.pdf_file_list = QListWidget()
-        left.addWidget(self.pdf_file_list, 1)
+        self.pdf_new_list = QListWidget()
+        self.pdf_new_list.setToolTip("이번 세션에서 추가한 파일 목록")
+        ln.addWidget(self.pdf_new_list, 1)
 
-        self.btn_del_pdf = QPushButton("선택 삭제")
-        self.btn_del_pdf.clicked.connect(self.on_delete_pdf)
-        left.addWidget(self.btn_del_pdf)
+        left.addWidget(box_new)
 
-        # 우측: 채팅 + Evidence
+        # (아래) 저장됨 섹션
+        box_saved = QFrame(); box_saved.setFrameShape(QFrame.StyledPanel)
+        ls = QVBoxLayout(box_saved); ls.setContentsMargins(8,8,8,8)
+        title_saved = QLabel("📚 저장된 파일(로컬 DB)")
+        title_saved.setStyleSheet("font-weight:600;")
+        ls.addWidget(title_saved)
+
+        btn_row_saved = QHBoxLayout()
+        self.btn_refresh_saved = QPushButton("새로고침")
+        self.btn_refresh_saved.clicked.connect(self.refresh_pdf_saved_list)
+        self.btn_del_pdf_saved = QPushButton("선택 삭제")
+        self.btn_del_pdf_saved.clicked.connect(lambda: self.on_delete_pdf(target="saved"))
+        btn_row_saved.addWidget(self.btn_refresh_saved)
+        btn_row_saved.addStretch(1)
+        btn_row_saved.addWidget(self.btn_del_pdf_saved)
+        ls.addLayout(btn_row_saved)
+
+        self.pdf_saved_list = QListWidget()
+        self.pdf_saved_list.setToolTip("DB에 저장된 모든 PDF")
+        ls.addWidget(self.pdf_saved_list, 1)
+
+        left.addWidget(box_saved, 1)
+
+        # ============== 우측: 챗/Evidence ==============
         right.addWidget(QLabel("💬 PDF 내용에 대해 질문하기"))
         self.pdf_chat = ChatView()
-        self.pdf_chat.add_bot("PDF 파일을 업로드하고 내용에 대해 질문해 주세요.")
+        self.pdf_chat.add_bot("PDF를 드롭/업로드하거나, 아래 저장된 목록에서 바로 질문하세요.")
         right.addWidget(self.pdf_chat, 1)
 
-        # Evidence 탭
         self.pdf_tabs = QTabWidget()
         self.pdf_evidence = QTextEdit(); self.pdf_evidence.setReadOnly(True)
         self.pdf_tabs.addTab(self.pdf_evidence, "Evidence")
         right.addWidget(self.pdf_tabs, 1)
 
-        # 상태/입력
         self.pdf_status = QLabel("")
         right.addWidget(self.pdf_status)
 
         send_row = QHBoxLayout()
-        self.pdf_inp = QLineEdit()
-        self.pdf_inp.setPlaceholderText("질문을 입력하고 Enter…")
+        self.pdf_inp = QLineEdit(); self.pdf_inp.setPlaceholderText("질문을 입력하고 Enter…")
         self.pdf_inp.returnPressed.connect(self.on_ask_pdf)
         self.btn_send_pdf = QPushButton("▶")
         self.btn_send_pdf.clicked.connect(self.on_ask_pdf)
         send_row.addWidget(self.pdf_inp, 1)
         send_row.addWidget(self.btn_send_pdf)
         right.addLayout(send_row)
+
+        # 시작 시 저장된 목록 채우기
+        QTimer.singleShot(0, self.refresh_pdf_saved_list)
+
 
     # 공용: 시뮬 정지
     def _stop_simulation_if_running(self):
@@ -608,13 +762,20 @@ class MainWindow(QWidget):
         # 기존(메타/CSV)용
         self.chroma = build_chroma(self.emb, s.vector_db_dir)
 
-        # [추가] 문서 전용 벡터DB (vector_db_dir/docs)
+        # 문서 전용 벡터DB (vector_db_dir/docs)
         docs_dir = Path(s.vector_db_dir) / "docs"
         docs_dir.mkdir(parents=True, exist_ok=True)
         self.chroma_docs = build_chroma(self.emb, str(docs_dir))
 
+        # PDF 텍스트 테이블 보장
+        ensure_pdf_tables(self.engine)
+
         # PDF 텍스트 분할기
-        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=180)
+
+        # 문서 이미지 저장 폴더
+        self.images_dir = Path(self.s.vector_db_dir) / "doc_images"
+        self.images_dir.mkdir(parents=True, exist_ok=True)
 
     # LLM 보조
     def build_prompt(self, question: str) -> str:
@@ -667,62 +828,261 @@ class MainWindow(QWidget):
         self.pdf_inp.setReadOnly(busy)
         self.pdf_status.setText("답변 생성 중..." if busy else "")
 
-    # 파일 업로드/인덱싱 (CSV)
+
+
+# app/main10_pdf_rag.py 파일에서
+# 기존 on_upload, handle_csv_paths, on_delete_files를 지우고 아래 코드로 대체
+
+# app/main10_pdf_rag.py 파일에서 이 함수를 찾아 통째로 교체하세요.
+
+# app/main10_pdf_rag.py 파일에서 이 함수를 찾아 통째로 교체하세요.
+
+    def refresh_csv_saved_list(self):
+        """files_registry.json을 읽어 저장된 CSV 목록을 갱신."""
+        try:
+            # core/files_registry.py에 있는 load_registry 함수를 직접 사용
+            entries = load_registry()
+        except Exception as e:
+            QMessageBox.critical(self, "CSV 레지스트리 로딩 오류", str(e))
+            return
+
+        self.file_ids = {} # {filename: file_id}
+        self.csv_saved_list.clear()
+        for file_id, data in entries.items():
+            # path 키에서 파일명을 안전하게 추출
+            path_str = data.get("path")
+            if not path_str: continue
+            fname = Path(path_str).name
+            
+            # CSV 파일만 필터링하여 목록에 추가
+            if fname.lower().endswith(".csv"):
+                self.file_ids[fname] = file_id
+                rows = data.get("rows", 0)
+                cols = data.get("cols", 0)
+                it = QListWidgetItem(f"{fname} ({rows}x{cols})")
+                it.setData(Qt.UserRole, fname)
+                it.setCheckState(Qt.Unchecked)
+                self.csv_saved_list.addItem(it)
+
     def on_upload(self):
         files, _ = QFileDialog.getOpenFileNames(self, "CSV 파일 선택", str(self.s.uploads_dir), "CSV Files (*.csv)")
         if files:
             self.handle_csv_paths(files)
 
     def handle_csv_paths(self, paths: list[str]):
-        prog = QProgressDialog("CSV 처리 중...", "취소", 0, len(paths), self)
+        # PDF 처리 방식과 동일하게 스레드 및 진행률 표시 사용
+        from threading import Event
+        prog = QProgressDialog("CSV 처리 및 인덱싱 중...", "취소", 0, len(paths), self)
         prog.setWindowModality(Qt.WindowModal); prog.setMinimumDuration(300)
-        ok, fail = 0, 0
-        for i, p in enumerate(paths, 1):
-            prog.setValue(i - 1); QApplication.processEvents()
-            if prog.wasCanceled(): break
-            try:
-                df, meta, _ = load_and_meta(Path(p), self.s.meta_json_dir)
-                entry = upsert_entry(Path(p), rows=meta["rows"], cols=meta["cols"], status="indexed")
-                upsert_texts(self.chroma, entry.file_id, build_embedding_texts_from_meta(meta))
-                self.file_ids[Path(p).name] = entry.file_id
-                table = table_name_from_file(Path(p).name)
-                ingest_df(self.engine, df, table); ensure_indexes(self.engine, table)
-                try:
-                    if _build_meta_for_table:
-                        sessions = _build_meta_for_table(self.s.db_url, table)
-                        if _index_sessions: _index_sessions(self.s.db_url, str(self.s.vector_db_dir), sessions)
-                except Exception as _e:
-                    self.chat.add_bot(f"⚠️ 메타/인덱싱 경고: {Path(p).name}\n{_e}")
-                self.csv_files.append((Path(p).name, df))
-                it = QListWidgetItem(Path(p).name); it.setCheckState(Qt.Unchecked); self.file_list.addItem(it)
-                self.chat.add_bot(f"✅ 업로드 완료: {Path(p).name}\n(table={table})"); ok += 1
-            except Exception as e:
-                self.chat.add_bot(f"❌ 업로드 실패: {p}\n{e}"); fail += 1
-        prog.setValue(len(paths))
-        QMessageBox.information(self, "완료", f"성공 {ok} / 실패 {fail}")
-        self.update_report_summary()
+        cancel_event = Event()
+        try: prog.canceled.connect(cancel_event.set)
+        except: pass
 
-    def on_delete_files(self):
-        items = [self.file_list.item(i) for i in range(self.file_list.count()) if self.file_list.item(i).checkState() == Qt.Checked]
-        if not items:
-            return QMessageBox.information(self, "알림", "체크된 파일이 없습니다.")
-        if QMessageBox.question(self, "삭제 확인", f"{len(items)}개 파일을 삭제합니다. 계속할까요?") != QMessageBox.Yes:
-            return
-        for it in items:
-            fname = it.text()
-            self.csv_files = [(f, df) for f, df in self.csv_files if f != fname]
-            self.file_list.takeItem(self.file_list.row(it))
-            table = table_name_from_file(fname)
+        def _task(file_paths, progress_callback, cancel_event):
+            """
+            Ingest CSV files and compute basic statistics/preview for each.
+
+            Returns (ok, fail, results) where results contains tuples:
+            (filename, rows, cols, missing_total, desc_str, preview_str, df)
+            for each successfully processed file. These additional values
+            enable later rendering of summary and preview in the UI.
+            """
+            ok, fail, results = 0, [], []
+            for i, p_str in enumerate(file_paths, 1):
+                if cancel_event.is_set():
+                    break
+                path = Path(p_str)
+                progress_callback(i - 1, f"{path.name} 처리 중...")
+                try:
+                    # Load CSV and metadata
+                    df, meta, _ = load_and_meta(path, self.s.meta_json_dir)
+                    # Register file into registry
+                    entry = upsert_entry(path, rows=meta["rows"], cols=meta["cols"], status="indexed")
+                    # Insert embeddings per column
+                    upsert_texts(self.chroma, entry.file_id, build_embedding_texts_from_meta(meta))
+                    # Ingest into SQL table
+                    table = table_name_from_file(path.name)
+                    ingest_df(self.engine, df, table)
+                    ensure_indexes(self.engine, table)
+                    # Compute statistics
+                    try:
+                        missing_total = int(df.isna().sum().sum())
+                    except Exception:
+                        missing_total = 0
+                    try:
+                        desc_df = df.describe(include="all")
+                        desc_str = desc_df.to_string(max_cols=6, max_rows=10)
+                    except Exception:
+                        desc_str = ""
+                    try:
+                        preview_df = df.head(20)
+                        preview_str = preview_df.to_string(index=False)
+                    except Exception:
+                        preview_str = ""
+                    results.append((path.name, meta["rows"], meta["cols"], missing_total, desc_str, preview_str, df))
+                    ok += 1
+                except Exception as e:
+                    fail.append(f"{path.name}: {e}")
+            return ok, fail, results
+
+        def _done(res, err):
+            prog.close()
+            if err:
+                return QMessageBox.critical(self, "CSV 처리 오류", str(err))
+            ok, fail, results = res
+            last_df = None
+            # Populate UI for new files and append summaries
+            for (name, rows, cols, missing_total, desc_str, preview_str, df) in results:
+                # Add to new files list
+                it = QListWidgetItem(f"{name} ({rows}x{cols})")
+                it.setData(Qt.UserRole, name)
+                it.setCheckState(Qt.Unchecked)
+                self.csv_new_list.addItem(it)
+                # Notify via chat
+                self.chat.add_bot(f"✅ 업로드 완료: {name}")
+                # Build summary text
+                summary_text = (
+                    f"[파일] {name}\n"
+                    f"- 행 수: {rows}\n"
+                    f"- 열 수: {cols}\n"
+                    f"- 결측치 총합: {missing_total}\n"
+                )
+                if desc_str:
+                    summary_text += f"\n[통계 요약]\n{desc_str}\n"
+                if preview_str:
+                    summary_text += f"\n[미리보기]\n{preview_str}\n"
+                try:
+                    # Append to report tab
+                    self.report.append(summary_text)
+                except Exception:
+                    current_text = self.report.toPlainText()
+                    self.report.setPlainText(current_text + "\n" + summary_text)
+                last_df = df
+            # Refresh saved list
+            self.refresh_csv_saved_list()
+            # Render preview of last uploaded file
+            if last_df is not None:
+                try:
+                    self.render_all(last_df, sql=None)
+                except Exception:
+                    pass
+            # Summary message
+            summary_msg = f"성공: {ok}건"
+            if fail:
+                summary_msg += f"\n실패: {len(fail)}건\n" + "\n".join(fail)
+            QMessageBox.information(self, "CSV 처리 완료", summary_msg)
+
+        worker, thread = run_in_thread(self, _task, _done, paths, progress_callback=None, cancel_event=cancel_event)
+        worker.progress.connect(lambda i, msg: (prog.setValue(i), prog.setLabelText(msg)))
+
+
+    def on_delete_files(self, target: str):
+        widget = self.csv_new_list if target == "new" else self.csv_saved_list
+        items = [widget.item(i) for i in range(widget.count()) if widget.item(i).checkState() == Qt.Checked]
+        if not items: return QMessageBox.information(self, "알림", "체크된 파일이 없습니다.")
+        if QMessageBox.question(self, "삭제 확인", f"{len(items)}개 파일을 삭제합니다. 계속할까요?") != QMessageBox.Yes: return
+
+        errors = []
+        fnames_to_delete = [it.data(Qt.UserRole) for it in items]
+
+        for fname in fnames_to_delete:
             try:
+                # 1) DB 테이블 삭제
+                table = table_name_from_file(fname)
                 with self.engine.begin() as c:
                     c.exec_driver_sql(f'DROP TABLE IF EXISTS "{table}"')
+                
+                # 2) Chroma 벡터 삭제
+                fid = self.file_ids.get(fname)
+                if fid:
+                    # 메타데이터는 대략 2000개 미만으로 가정하고 삭제
+                    self.chroma.delete(ids=[f"{fid}:{i:04d}" for i in range(2000)])
+                
+                # 3) 레지스트리에서 삭제 (core.files_registry에 삭제 함수가 없으므로 직접 구현)
+                registry_path = Path(self.s.data_dir) / "files_registry.json"
+                if registry_path.exists():
+                    with open(registry_path, "r+", encoding="utf-8") as f:
+                        entries = json.load(f)
+                        fid_to_del = self.file_ids.get(fname)
+                        if fid_to_del in entries:
+                            del entries[fid_to_del]
+                        f.seek(0); f.truncate()
+                        json.dump(entries, f, indent=2)
+
             except Exception as e:
-                self.chat.add_bot(f"⚠️ DB 테이블 삭제 경고: {table} / {e}")
-            fid = self.file_ids.pop(fname, None)
-            if fid:
-                try: self.chroma.delete(ids=[f"{fid}:{i:04d}" for i in range(2000)])
-                except Exception as e: self.chat.add_bot(f"⚠️ 임베딩 삭제 경고: {fname} / {e}")
-        self.update_report_summary(); self.chat.add_bot("🗑️ 선택 파일 삭제 완료")
+                errors.append(f"{fname}: {e}")
+
+        # UI 갱신
+        self.refresh_csv_saved_list()
+        # 'new' 리스트에서는 직접 제거
+        for i in reversed(range(self.csv_new_list.count())):
+            it = self.csv_new_list.item(i)
+            if it.data(Qt.UserRole) in fnames_to_delete:
+                self.csv_new_list.takeItem(i)
+
+        if errors:
+            self.chat.add_bot("일부 삭제 실패:\n" + "\n".join(errors))
+        else:
+            self.chat.add_bot("🗑️ 선택 파일 삭제 완료")
+
+
+
+    # # 파일 업로드/인덱싱 (CSV)
+    # def on_upload(self):
+    #     files, _ = QFileDialog.getOpenFileNames(self, "CSV 파일 선택", str(self.s.uploads_dir), "CSV Files (*.csv)")
+    #     if files:
+    #         self.handle_csv_paths(files)
+
+    # def handle_csv_paths(self, paths: list[str]):
+    #     prog = QProgressDialog("CSV 처리 중...", "취소", 0, len(paths), self)
+    #     prog.setWindowModality(Qt.WindowModal); prog.setMinimumDuration(300)
+    #     ok, fail = 0, 0
+    #     for i, p in enumerate(paths, 1):
+    #         prog.setValue(i - 1); QApplication.processEvents()
+    #         if prog.wasCanceled(): break
+    #         try:
+    #             df, meta, _ = load_and_meta(Path(p), self.s.meta_json_dir)
+    #             entry = upsert_entry(Path(p), rows=meta["rows"], cols=meta["cols"], status="indexed")
+    #             upsert_texts(self.chroma, entry.file_id, build_embedding_texts_from_meta(meta))
+    #             self.file_ids[Path(p).name] = entry.file_id
+    #             table = table_name_from_file(Path(p).name)
+    #             ingest_df(self.engine, df, table); ensure_indexes(self.engine, table)
+    #             try:
+    #                 if _build_meta_for_table:
+    #                     sessions = _build_meta_for_table(self.s.db_url, table)
+    #                     if _index_sessions: _index_sessions(self.s.db_url, str(self.s.vector_db_dir), sessions)
+    #             except Exception as _e:
+    #                 self.chat.add_bot(f"⚠️ 메타/인덱싱 경고: {Path(p).name}\n{_e}")
+    #             self.csv_files.append((Path(p).name, df))
+    #             it = QListWidgetItem(Path(p).name); it.setCheckState(Qt.Unchecked); self.file_list.addItem(it)
+    #             self.chat.add_bot(f"✅ 업로드 완료: {Path(p).name}\n(table={table})"); ok += 1
+    #         except Exception as e:
+    #             self.chat.add_bot(f"❌ 업로드 실패: {p}\n{e}"); fail += 1
+    #     prog.setValue(len(paths))
+    #     QMessageBox.information(self, "완료", f"성공 {ok} / 실패 {fail}")
+    #     self.update_report_summary()
+
+    # def on_delete_files(self):
+    #     items = [self.file_list.item(i) for i in range(self.file_list.count()) if self.file_list.item(i).checkState() == Qt.Checked]
+    #     if not items:
+    #         return QMessageBox.information(self, "알림", "체크된 파일이 없습니다.")
+    #     if QMessageBox.question(self, "삭제 확인", f"{len(items)}개 파일을 삭제합니다. 계속할까요?") != QMessageBox.Yes:
+    #         return
+    #     for it in items:
+    #         fname = it.text()
+    #         self.csv_files = [(f, df) for f, df in self.csv_files if f != fname]
+    #         self.file_list.takeItem(self.file_list.row(it))
+    #         table = table_name_from_file(fname)
+    #         try:
+    #             with self.engine.begin() as c:
+    #                 c.exec_driver_sql(f'DROP TABLE IF EXISTS "{table}"')
+    #         except Exception as e:
+    #             self.chat.add_bot(f"⚠️ DB 테이블 삭제 경고: {table} / {e}")
+    #         fid = self.file_ids.pop(fname, None)
+    #         if fid:
+    #             try: self.chroma.delete(ids=[f"{fid}:{i:04d}" for i in range(2000)])
+    #             except Exception as e: self.chat.add_bot(f"⚠️ 임베딩 삭제 경고: {fname} / {e}")
+    #     self.update_report_summary(); self.chat.add_bot("🗑️ 선택 파일 삭제 완료")
 
     # LLM 질의 (CSV/DB + 메타)
     def on_ask(self):
@@ -751,15 +1111,34 @@ class MainWindow(QWidget):
             final_text = llm_final_only(self.llm, prompt_for_llm, df_snip, meta_snip, tone)
             checks_list = llm_checks_only(self.llm, prompt_for_llm, df_snip, meta_snip)
 
+            # Build evidence lines
             ev_lines = ["## 사용 근거"]
-            if sql: ev_lines += ["### 사용 SQL", "```sql", sql.strip(), "```"]
-            if isinstance(df, pd.DataFrame): ev_lines += ["### SQL 결과 개요", f"- 행 수: {len(df)}", f"- 열 수: {df.shape[1]}"]
+            if sql:
+                ev_lines += ["### 사용 SQL", "```sql", sql.strip(), "```"]
+            # Include basic info about SQL result
+            if isinstance(df, pd.DataFrame):
+                ev_lines += [
+                    "### SQL 결과 개요",
+                    f"- 행 수: {len(df)}",
+                    f"- 열 수: {df.shape[1]}"
+                ]
+                # Append preview of the first 10 rows
+                try:
+                    preview = df.head(10).to_string(index=False)
+                    ev_lines += ["", "### SQL 결과 미리보기", preview]
+                except Exception:
+                    pass
+            # Include RAG evidence snippet
             if docs:
                 ev_lines.append("### RAG 근거(상위 문서 첫 줄)")
                 for i, d in enumerate(docs[:5], 1):
                     ev_lines.append(f"{i}. {getattr(d, 'page_content', str(d)).splitlines()[0][:200]}")
-            if checks_list: ev_lines += ["", "## 추가 확인 항목", checks_list]
-            if err_sql and not sql: ev_lines += ["", "### SQL 생성/실행 참고", err_sql]
+            # Additional checks list
+            if checks_list:
+                ev_lines += ["", "## 추가 확인 항목", checks_list]
+            # SQL generation/ execution errors
+            if err_sql and not sql:
+                ev_lines += ["", "### SQL 생성/실행 참고", err_sql]
             return (q, final_text, df, sql, "\n".join(ev_lines))
 
         def _done(res, err):
@@ -767,16 +1146,79 @@ class MainWindow(QWidget):
             if err:
                 return QMessageBox.critical(self, "질의 오류", str(err))
             q, final_text, df, sql, evidence_text = res
+            # Display chatbot response
             self.chat.add_bot(final_text)
-            self.history.append((q, final_text)); self.save_history()
+            # Save history
+            self.history.append((q, final_text))
+            self.save_history()
+            # Render table and chart for SQL result
             if isinstance(df, pd.DataFrame):
                 self.render_all(df, sql)
+            # Show evidence text
             self.evidence.setPlainText(evidence_text)
+            # Simple keyword-based visualization triggers
+            try:
+                query_lower = q.lower()
+                # Correlation dashboard
+                if any(k in query_lower for k in ["상관관계", "correlation"]):
+                    QTimer.singleShot(0, self.run_correlation_dashboard)
+                # 3D path analysis
+                elif any(k in query_lower for k in ["3d", "경로", "path"]):
+                    QTimer.singleShot(0, self.run_3d_path_analysis)
+                # Process simulation
+                elif any(k in query_lower for k in ["시뮬레이션", "simulation"]):
+                    QTimer.singleShot(0, self.run_process_simulation)
+                # A*W volume dashboard
+                elif any(k in query_lower for k in ["a*w", "aw"]):
+                    QTimer.singleShot(0, self.run_aw_volume_dashboard)
+            except Exception:
+                pass
 
         run_in_thread(self, _task, _done)
 
-    # --- 신규: PDF RAG 기능 메서드들 ---
+    # --------------- 유틸: 이미지 갤러리 갱신 ---------------
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
 
+    def _refresh_images_gallery(self):
+        """self.pdf_images_map을 기준으로 Images 탭을 다시 그림."""
+        self._clear_layout(self.pdf_images_layout)
+        if not self.pdf_images_map:
+            lab = QLabel("추출된 이미지가 없습니다.")
+            lab.setStyleSheet("color:#6b7280;")
+            self.pdf_images_layout.addWidget(lab)
+            self.pdf_images_layout.addStretch(1)
+            return
+        for fname, paths in self.pdf_images_map.items():
+            title = QLabel(f"📄 {fname}  (이미지 {len(paths)}개)")
+            title.setStyleSheet("font-weight:600;")
+            self.pdf_images_layout.addWidget(title)
+            # 썸네일 나열 (한 행 5개)
+            def flush_row(row):
+                w = QWidget(); w.setLayout(row); self.pdf_images_layout.addWidget(w)
+            cnt = 0
+            row = QHBoxLayout(); row.setSpacing(12)
+            for p in paths:
+                try:
+                    pm = QPixmap(str(p))
+                    if not pm.isNull():
+                        thumb = pm.scaledToWidth(240, Qt.SmoothTransformation)
+                        lab = QLabel(); lab.setPixmap(thumb); lab.setToolTip(str(p))
+                        row.addWidget(lab); cnt += 1
+                        if cnt % 5 == 0:
+                            flush_row(row); row = QHBoxLayout(); row.setSpacing(12)
+                except Exception:
+                    pass
+            if row.count():
+                flush_row(row)
+            self.pdf_images_layout.addSpacing(8)
+        self.pdf_images_layout.addStretch(1)
+
+    # --- 신규: PDF RAG 기능 메서드들 ---
     def on_upload_pdf(self):
         files, _ = QFileDialog.getOpenFileNames(self, "PDF 파일 선택", "", "PDF Files (*.pdf)")
         if files:
@@ -799,33 +1241,81 @@ class MainWindow(QWidget):
                 if cancel_event.is_set():
                     break
                 path = Path(p_str)
-                progress_callback(i - 1, f"{path.name} 텍스트 추출 중...")
+                progress_callback(i - 1, f"{path.name} 텍스트/이미지 추출 중...")
                 try:
-                    reader = PdfReader(path)
-                    chunks_all = []
-                    for pi, page in enumerate(reader.pages, start=1):
-                        if cancel_event.is_set():
-                            break
-                        txt = page.extract_text() or ""
-                        if not txt.strip():
-                            continue
-                        # 페이지 텍스트 → 분할 → [파일명 | p.N] 프리픽스 부착
-                        chunks = self.text_splitter.split_text(txt)
-                        chunks = [f"[{path.name} | p.{pi}]\n{c}" for c in chunks]
-                        chunks_all.extend(chunks)
+                    # --- 1) 페이지 단위 텍스트 추출 ---
+                    chunks_all: List[Tuple[int,int,str]] = []  # (page, chunk_index, text)
+                    pages_count = 0
 
-                    if cancel_event.is_set():
-                        break
+                    if fitz is not None:
+                        doc = fitz.open(str(path))
+                        pages_count = doc.page_count
+                        for pi in range(pages_count):
+                            if cancel_event.is_set(): break
+                            txt = doc.load_page(pi).get_text("text") or ""
+                            if not txt.strip():
+                                continue
+                            parts = self.text_splitter.split_text(txt)
+                            parts = [f"[{path.name} | p.{pi+1}]\n{c}" for c in parts]
+                            chunks_all.extend((pi+1, idx, t) for idx, t in enumerate(parts))
+                        doc.close()
+                    else:
+                        reader = PdfReader(path)
+                        pages_count = len(reader.pages)
+                        for pi, page in enumerate(reader.pages, start=1):
+                            if cancel_event.is_set(): break
+                            txt = page.extract_text() or ""
+                            if not txt.strip():
+                                continue
+                            parts = self.text_splitter.split_text(txt)
+                            parts = [f"[{path.name} | p.{pi}]\n{c}" for c in parts]
+                            chunks_all.extend((pi, idx, t) for idx, t in enumerate(parts))
+
+                    if cancel_event.is_set(): break
                     if not chunks_all:
                         raise ValueError("텍스트를 추출할 수 없거나 문서가 비어 있습니다.")
 
-                    # 파일 ID 발급 및 업서트 (문서 전용 Chroma)
-                    entry = upsert_entry(path, rows=len(reader.pages), cols=0, status="indexed")
-                    file_id = entry.file_id
-                    ids = [f"{file_id}:{idx:04d}" for idx in range(len(chunks_all))]
-                    self.chroma_docs.add_texts(texts=chunks_all, ids=ids)
+                    # --- 2) DB 저장 ---
+                    doc_id = insert_pdf(self.engine, path.name, pages_count)
+                    chunk_ids = insert_chunks(self.engine, doc_id, chunks_all)  # -> [chunk_id...]
 
-                    results.append((path.name, file_id, len(chunks_all)))
+                    # --- 3) 벡터 인덱싱(문서 전용 chroma_docs): id=chunk_id ---
+                    texts = [t for (_pg, _idx, t) in chunks_all]
+                    metas = [{"chunk_id": cid, "doc_id": doc_id, "filename": path.name, "page": pg}
+                             for (pg, _idx, _t), cid in zip(chunks_all, chunk_ids)]
+                    ids = [str(cid) for cid in chunk_ids]
+                    self.chroma_docs.add_texts(texts=texts, ids=ids, metadatas=metas)
+
+                    # --- 4) 이미지 추출 (PyMuPDF 있을 때) ---
+                    image_paths: List[str] = []
+                    if fitz is not None:
+                        try:
+                            doc = fitz.open(str(path))
+                            max_images = 40
+                            for pi in range(len(doc)):
+                                if len(image_paths) >= max_images: break
+                                for img in doc.get_page_images(pi):
+                                    xref = img[0]
+                                    w, h = img[2], img[3]
+                                    if (w or 0) * (h or 0) < 20000:  # 작은 아이콘/배경 스킵
+                                        continue
+                                    try:
+                                        pix = doc.extract_image(xref)
+                                        ext = pix.get("ext", "png")
+                                        data = pix.get("image")
+                                        out = self.images_dir / f"{doc_id}_p{pi+1}_{len(image_paths)}.{ext}"
+                                        with open(out, "wb") as f:
+                                            f.write(data)
+                                        image_paths.append(str(out))
+                                        if len(image_paths) >= max_images:
+                                            break
+                                    except Exception:
+                                        continue
+                            doc.close()
+                        except Exception:
+                            pass
+
+                    results.append((path.name, doc_id, len(chunk_ids), image_paths))
                     ok += 1
                 except Exception as e:
                     fail.append(f"{path.name}: {e}")
@@ -834,52 +1324,78 @@ class MainWindow(QWidget):
         def _done(res, err):
             prog.close()
             if err:
-                QMessageBox.critical(self, "PDF 처리 오류", str(err))
-                return
+                QMessageBox.critical(self, "PDF 처리 오류", str(err)); return
 
             ok, fail, results = res
-            # UI 반영
-            existing = [self.pdf_file_list.item(i).text() for i in range(self.pdf_file_list.count())]
-            for name, fid, n_chunks in results:
-                self.pdf_rag_files[name] = fid
-                self.pdf_chunk_counts[name] = n_chunks
-                if name not in existing:
-                    it = QListWidgetItem(name)
-                    it.setCheckState(Qt.Unchecked)
-                    self.pdf_file_list.addItem(it)
+
+            # 신규 목록에 먼저 반영
+            for name, doc_id, n_chunks in results:
+                it = QListWidgetItem(f"{name}   (chunks={n_chunks})")
+                it.setData(Qt.UserRole, name)
+                it.setCheckState(Qt.Unchecked)
+                self.pdf_new_list.addItem(it)
                 self.pdf_chat.add_bot(f"업로드 완료: {name} (chunks={n_chunks})")
+
+            # 저장됨(아래) 목록은 DB 기준으로 전체 새로고침
+            self.refresh_pdf_saved_list()
 
             summary = f"성공: {ok}건"
             if fail:
                 summary += f"\n실패: {len(fail)}건\n" + "\n".join(fail)
             QMessageBox.information(self, "PDF 처리 완료", summary)
 
+
         worker, thread = run_in_thread(self, _task, _done, paths, progress_callback=None, cancel_event=cancel_event)
         worker.progress.connect(lambda i, msg: (prog.setValue(i), prog.setLabelText(msg)))
 
-    def on_delete_pdf(self):
-        items = [self.pdf_file_list.item(i) for i in range(self.pdf_file_list.count())
-                 if self.pdf_file_list.item(i).checkState() == Qt.Checked]
+    def on_delete_pdf(self, target: str = "saved"):
+        """
+        target: 'new' | 'saved'
+        - 'new' 리스트에서 선택 삭제해도 실제 DB/Chroma까지 삭제.
+        - 'saved' 리스트는 당연히 DB/Chroma 삭제.
+        """
+        widget = self.pdf_new_list if target == "new" else self.pdf_saved_list
+        items = [widget.item(i) for i in range(widget.count())
+                if widget.item(i).checkState() == Qt.Checked]
         if not items:
             return QMessageBox.information(self, "알림", "체크된 문서가 없습니다.")
-        if QMessageBox.question(self, "삭제 확인", f"{len(items)}개 문서를 삭제합니다. 계속할까요?") != QMessageBox.Yes:
+
+        if QMessageBox.question(self, "삭제 확인",
+                                f"{len(items)}개 문서를 삭제합니다. 계속할까요?") != QMessageBox.Yes:
             return
 
+        errors = []
         for it in items:
-            fname = it.text()
-            row = self.pdf_file_list.row(it)
-            self.pdf_file_list.takeItem(row)
+            label = it.text()
+            fname = it.data(Qt.UserRole) or label.split("   ")[0]  # 저장 시 UserRole에 fname 넣음
+            doc_id = self.pdf_rag_files.get(fname)
+            try:
+                if doc_id:
+                    # 1) Chroma 삭제
+                    cids = list_chunk_ids_by_doc(self.engine, doc_id)
+                    if cids:
+                        self.chroma_docs.delete(ids=[str(x) for x in cids])
+                    # 2) DB 삭제
+                    delete_doc(self.engine, doc_id)
+            except Exception as e:
+                errors.append(f"{fname}: {e}")
 
-            fid = self.pdf_rag_files.pop(fname, None)
-            n_chunks = self.pdf_chunk_counts.pop(fname, 0)
-            if fid and n_chunks > 0:
-                try:
-                    ids = [f"{fid}:{i:04d}" for i in range(n_chunks)]
-                    self.chroma_docs.delete(ids=ids)
-                except Exception as e:
-                    self.pdf_chat.add_bot(f"임베딩 삭제 경고: {fname} / {e}")
+        # UI 양쪽에서 모두 제거
+        def _remove_from(lst: QListWidget):
+            for i in reversed(range(lst.count())):
+                it = lst.item(i)
+                fname_i = it.data(Qt.UserRole) or it.text().split("   ")[0]
+                if any((fname_i == (itm.data(Qt.UserRole) or itm.text().split('   ')[0])) for itm in items):
+                    lst.takeItem(i)
 
-        self.pdf_chat.add_bot("선택 문서 삭제 완료")
+        _remove_from(self.pdf_new_list)
+        self.refresh_pdf_saved_list()  # 아래 리스트는 DB 기준으로 재로딩
+
+        if errors:
+            self.pdf_chat.add_bot("일부 삭제 실패:\n" + "\n".join(errors))
+        else:
+            self.pdf_chat.add_bot("선택 문서 삭제 완료")
+
 
     def on_ask_pdf(self):
         q = self.pdf_inp.text().strip()
@@ -891,20 +1407,43 @@ class MainWindow(QWidget):
         self.set_pdf_busy(True)
 
         def _task():
-            # 1) 문서 전용 컬렉션에서 RAG 검색
+            # 1) 문서 전용 컬렉션에서 벡터 검색 → chunk_id 수집
+            chunk_ids: List[int] = []
             try:
                 docs = self.chroma_docs.similarity_search(q, k=6)
             except Exception:
                 docs = []
-            # 2) 컨텍스트 구성 (상위 4~6개)
-            context = "\n\n---\n\n".join(getattr(d, "page_content", str(d)) for d in docs[:6])
-            # 3) LLM 호출
+
+            for d in docs:
+                cid = None
+                md = getattr(d, "metadata", {}) or {}
+                if "chunk_id" in md:
+                    cid = int(md["chunk_id"])
+                else:
+                    try:
+                        cid = int(getattr(d, "id", None) or md.get("id"))
+                    except Exception:
+                        cid = None
+                if cid:
+                    chunk_ids.append(cid)
+
+            # 2) DB에서 정확 텍스트 로드
+            context_texts = fetch_chunks_by_ids(self.engine, chunk_ids[:6]) if chunk_ids else []
+
+            # 3) 백업: LIKE 키워드 검색
+            if not context_texts:
+                found = keyword_search_chunks(self.engine, q, limit=6)
+                chunk_ids = [cid for cid, _ in found]
+                context_texts = [txt for _, txt in found]
+
+            context = "\n\n---\n\n".join(context_texts)
             answer = llm_pdf_rag_answer(self.llm, q, context)
-            # Evidence 출력용
+
+            # Evidence
             ev_lines = ["## Retrieved Evidence"]
-            for i, d in enumerate(docs[:6], 1):
-                first_line = getattr(d, "page_content", str(d)).splitlines()[0][:200]
-                ev_lines.append(f"{i}. {first_line}")
+            for i, txt in enumerate(context_texts[:6], 1):
+                first = (txt.splitlines() or [""])[0][:200]
+                ev_lines.append(f"{i}. {first}")
             return (q, answer, "\n".join(ev_lines))
 
         def _done(res, err):
@@ -1185,10 +1724,33 @@ class MainWindow(QWidget):
             self.inp.setText("이 분석 결과가 의미하는 바를 해석하고, 공정 개선을 위한 제안 3가지를 해줘.")
             self.inp.setFocus()
 
+        # 창 닫을 때 정리
     def closeEvent(self, event):
-        self._stop_simulation_if_running()
-        self.save_history()
+        try:
+            # 1) 시뮬레이션 타이머 정지
+            self._stop_simulation_if_running()
+
+            # 2) PyVista 렌더러 안전 종료
+            if self.active_plotter:
+                try:
+                    self.active_plotter.close()
+                    self.active_plotter.deleteLater()
+                except Exception:
+                    pass
+                self.active_plotter = None
+
+            # 3) Matplotlib Figure 닫기 (메모리 릭 방지)
+            plt.close('all')
+
+            # 4) 히스토리 저장
+            self.save_history()
+
+        except Exception as e:
+            print(f"[closeEvent 경고] {e}")
+
         super().closeEvent(event)
+
+
 
 
 if __name__ == "__main__":

@@ -51,11 +51,11 @@ from core.rag_ops import (
 from core.llm_ops import build_llm, build_sql_chain, generate_sql_from_nlq
 from core.plotting import df_to_table, plot_df_line
 from core.files_registry import upsert_entry, load_registry
-from core.analysis_visualizer import AnalysisVisualizer
+from core2.analysis_visualizer import AnalysisVisualizer
 
 # --- pdf_store: 모듈이 없으면 폴백 함수 정의 ---
 try:
-    from core.pdf_store import (
+    from core2.pdf_store import (
     ensure_pdf_tables, insert_pdf, insert_chunks,
     list_chunk_ids_by_doc, fetch_chunks_by_ids, delete_doc, keyword_search_chunks,
     list_all_docs,   # ← 추가
@@ -399,8 +399,6 @@ class MainWindow(QWidget):
         self.in_deep_report: bool = False
         self.deep_report_inputs: List[str] = []
         self.current_df: pd.DataFrame | None = None
-        # For deep report: allow multiple datasets to be loaded
-        self.current_dfs: List[Tuple[pd.DataFrame, str]] = []
 
         # 시뮬 상태/타이머
         self.simulation_timer = QTimer(self)
@@ -555,31 +553,6 @@ class MainWindow(QWidget):
         self.adv_fig = plt.figure()
         self.adv_canvas = FigureCanvas(self.adv_fig)
         self.adv_tab_index = self.tabs.addTab(self.adv_canvas, "시각화 결과")
-
-        # (6) 전문가 코멘트: 도메인 지식 메모장 탭
-        self.expert_tab = QWidget()
-        expert_layout = QVBoxLayout(self.expert_tab)
-        # 입력 영역 (여러 줄)
-        self.expert_input = QTextEdit()
-        self.expert_input.setPlaceholderText("전문가의 코멘트를 입력하세요...")
-        expert_layout.addWidget(self.expert_input)
-        # 저장 버튼
-        self.btn_save_expert = QPushButton("저장")
-        self.btn_save_expert.clicked.connect(self.on_save_expert_comment)
-        expert_layout.addWidget(self.btn_save_expert)
-        # 스크롤 영역 내 컨테이너 (저장된 코멘트를 나열)
-        self.expert_scroll = QScrollArea()
-        self.expert_scroll.setWidgetResizable(True)
-        self.expert_container = QWidget()
-        self.expert_container_layout = QVBoxLayout(self.expert_container)
-        self.expert_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.expert_container_layout.setSpacing(4)
-        self.expert_scroll.setWidget(self.expert_container)
-        expert_layout.addWidget(self.expert_scroll, 1)
-        # 탭 추가
-        self.expert_tab_index = self.tabs.addTab(self.expert_tab, "전문가 코멘트")
-        # Populate expert comments from DB
-        QTimer.singleShot(0, self.load_expert_comments)
 
         # 시작 시 저장된 CSV 목록 채우기
         QTimer.singleShot(0, self.refresh_csv_saved_list)
@@ -844,33 +817,6 @@ class MainWindow(QWidget):
         self.images_dir = Path(self.s.vector_db_dir) / "doc_images"
         self.images_dir.mkdir(parents=True, exist_ok=True)
 
-        # 전문가 코멘트 테이블 보장
-        try:
-            with self.engine.begin() as c:
-                dialect = getattr(self.engine, "dialect", None)
-                if dialect and getattr(dialect, "name", "").lower() == "postgresql":
-                    # PostgreSQL용: SERIAL 사용
-                    ddl = """
-        CREATE TABLE IF NOT EXISTS expert_comments (
-            id SERIAL PRIMARY KEY,
-            content TEXT NOT NULL,
-            created_at TEXT
-        )
-        """
-                else:
-                    # SQLite 등 AUTOINCREMENT를 지원하는 DB용
-                    ddl = """
-        CREATE TABLE IF NOT EXISTS expert_comments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            content TEXT NOT NULL,
-            created_at TEXT
-        )
-        """
-                c.exec_driver_sql(ddl)
-        except Exception as e:
-            print(f"[expert_comments table init error] {e}")
-
-
     # LLM 보조
     def build_prompt(self, question: str) -> str:
         full_question = question
@@ -891,17 +837,6 @@ class MainWindow(QWidget):
             # Attach summary and list of selected filenames
             selected_context = "[선택된 데이터 파일 요약]\n" + summary + "\n\n"
             full_question = selected_context + full_question
-        # Include expert comments from DB as domain knowledge
-        try:
-            with self.engine.begin() as c:
-                rows = c.exec_driver_sql("SELECT content FROM expert_comments").fetchall()
-                exp_comments = [r[0] for r in rows]
-        except Exception:
-            exp_comments = []
-        if exp_comments:
-            comments_str = "\n\n".join(exp_comments)
-            expert_context = "[전문가 코멘트]\n" + comments_str + "\n\n"
-            full_question = expert_context + full_question
         context = "".join(f"이전 Q: {q}\n이전 A: {a}\n" for q, a in self.history[-MAX_HISTORY_TURNS:])
         return context + f"질문: {full_question}"
 
@@ -1910,109 +1845,6 @@ class MainWindow(QWidget):
             self.inp.setFocus()
 
     # ------------------------------------------------------------------
-    # 전문가 코멘트 관리 메서드들
-    def load_expert_comments(self):
-        """
-        Load expert comments from the database and populate the expert comments tab.
-        Each comment will be displayed with a delete (X) button.
-        """
-        # Clear existing UI items
-        layout = self.expert_container_layout
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        # Fetch comments from DB
-        comments = []
-        try:
-            with self.engine.begin() as c:
-                rows = c.exec_driver_sql("SELECT id, content FROM expert_comments ORDER BY id").fetchall()
-                comments = [(int(r[0]), r[1]) for r in rows]
-        except Exception as e:
-            print(f"[load_expert_comments error] {e}")
-        # Populate UI
-        for cid, text in comments:
-            fr = QFrame()
-            fr.setFrameShape(QFrame.StyledPanel)
-            h_layout = QHBoxLayout(fr)
-            h_layout.setContentsMargins(4, 4, 4, 4)
-            lab = QLabel(text)
-            lab.setWordWrap(True)
-            h_layout.addWidget(lab, 1)
-            btn_del = QPushButton("✕")
-            btn_del.setFixedWidth(24)
-            btn_del.setStyleSheet("color: red; font-weight: bold;")
-            # Use lambda to capture comment id
-            btn_del.clicked.connect(lambda _, cid=cid: self.on_delete_expert_comment(cid))
-            h_layout.addWidget(btn_del)
-            layout.addWidget(fr)
-        # Add stretch to push items to top
-        layout.addStretch(1)
-
-    def on_save_expert_comment(self):
-        """
-        Save the content of expert_input to the database as a new expert comment,
-        if it is not empty.
-        """
-        content = self.expert_input.toPlainText().strip()
-        if not content:
-            QMessageBox.information(self, "입력 필요", "코멘트를 입력한 뒤 저장하세요.")
-            return
-        try:
-            from datetime import datetime
-            now = datetime.utcnow().isoformat()
-        except Exception:
-            now = None
-        try:
-            with self.engine.begin() as c:
-                # psycopg2 (PostgreSQL) doesn't accept ':' parameters; choose param style based on dialect
-                dialect = getattr(self.engine, "dialect", None)
-                # Default to SQLite/qmark style
-                if dialect and getattr(dialect, "name", "").lower() == "postgresql":
-                    # Use Postgres pyformat (positional) placeholders
-                    stmt = "INSERT INTO expert_comments (content, created_at) VALUES (%s, %s)"
-                    params = (content, now)
-                else:
-                    # Use qmark style placeholders (e.g. SQLite)
-                    stmt = "INSERT INTO expert_comments (content, created_at) VALUES (?, ?)"
-                    params = (content, now)
-                c.exec_driver_sql(stmt, params)
-            # Clear input after saving
-            self.expert_input.clear()
-            # Refresh list
-            self.load_expert_comments()
-            QMessageBox.information(self, "저장", "코멘트가 저장되었습니다.")
-        except Exception as e:
-            QMessageBox.warning(self, "저장 실패", f"코멘트를 저장할 수 없습니다: {e}")
-
-    def on_delete_expert_comment(self, comment_id: int):
-        """
-        Delete an expert comment from the database and update the UI.
-        """
-        # Confirm deletion
-        resp = QMessageBox.question(
-            self, "삭제 확인", "정말 이 코멘트를 삭제하시겠습니까?", QMessageBox.Yes | QMessageBox.No
-        )
-        if resp != QMessageBox.Yes:
-            return
-        try:
-            with self.engine.begin() as c:
-                dialect = getattr(self.engine, "dialect", None)
-                # Build deletion statement based on DB dialect
-                if dialect and getattr(dialect, "name", "").lower() == "postgresql":
-                    stmt = "DELETE FROM expert_comments WHERE id = %s"
-                    params = (comment_id,)
-                else:
-                    stmt = "DELETE FROM expert_comments WHERE id = ?"
-                    params = (comment_id,)
-                c.exec_driver_sql(stmt, params)
-            # Refresh list
-            self.load_expert_comments()
-        except Exception as e:
-            QMessageBox.warning(self, "삭제 실패", f"코멘트를 삭제할 수 없습니다: {e}")
-
-    # ------------------------------------------------------------------
     # 선택된 CSV 파일 명단을 반환
     def get_selected_filenames(self) -> List[str]:
         """Return the list of filenames that are checked in the CSV lists."""
@@ -2144,75 +1976,8 @@ class MainWindow(QWidget):
         Initiate deep report mode. Prompt the user to provide context for an in-depth report.
         """
         if self.current_df is None:
-            # If no dataset is loaded, attempt to load all selected files
-            try:
-                selected = self.get_selected_filenames()
-            except Exception:
-                selected = []
-            if selected:
-                # Reset current_dfs list
-                self.current_dfs = []
-                for fname in selected:
-                    # Attempt to load DataFrame (similar to on_load_saved_csv logic)
-                    path_str = None
-                    file_id = self.file_ids.get(fname)
-                    if file_id:
-                        try:
-                            entries = load_registry()
-                            entry = entries.get(file_id)
-                            if entry and entry.get("path"):
-                                path_str = entry["path"]
-                        except Exception:
-                            pass
-                    df_loaded = None
-                    if path_str and os.path.exists(path_str):
-                        try:
-                            df_loaded, meta, _ = load_and_meta(Path(path_str), self.s.meta_json_dir)
-                        except Exception:
-                            try:
-                                df_loaded = pd.read_csv(path_str)
-                            except Exception:
-                                df_loaded = None
-                    if df_loaded is None:
-                        # Fallback to DB table
-                        try:
-                            table = table_name_from_file(fname)
-                            df_loaded = run_sql(self.engine, f'SELECT * FROM "{table}"')
-                        except Exception:
-                            df_loaded = None
-                    if isinstance(df_loaded, pd.DataFrame) and not df_loaded.empty:
-                        self.current_dfs.append((df_loaded, fname))
-                # If at least one dataset loaded, set current_df to the first and update visualizer
-                if self.current_dfs:
-                    # Use the first loaded dataset as current_df for visualization
-                    first_df, first_name = self.current_dfs[0]
-                    self.current_df = first_df
-                    self.df_viz = self.current_df
-                    try:
-                        self.visualizer = AnalysisVisualizer(self.current_df)
-                    except Exception:
-                        self.visualizer = None
-                    # Update viz tab UI to indicate the first file loaded
-                    try:
-                        self._stop_simulation_if_running()
-                        self.sim_controls_widget.hide()
-                        self.viz_stack.setCurrentIndex(0)
-                        self.viz_fig.clear()
-                        ax = self.viz_fig.add_subplot(111)
-                        ax.text(0.5, 0.5, f"'{first_name}' loaded.\nPlease select an analysis.", ha='center', va='center')
-                        ax.axis('off')
-                        self.viz_canvas.draw()
-                        for btn in [self.btn_run_stability, self.btn_run_correlation, self.btn_run_3d_path,
-                                    self.btn_run_simulation, self.btn_run_integrated, self.btn_run_aw_volume]:
-                            btn.setEnabled(True)
-                        self.btn_ask_llm_about_viz.setEnabled(False)
-                    except Exception:
-                        pass
-            # If still no dataset loaded, notify and abort
-            if self.current_df is None:
-                QMessageBox.information(
-                    self, "심층 리포트", "데이터가 로드되어 있지 않습니다. 먼저 CSV 파일을 선택하거나 업로드하세요.")
-                return
+            QMessageBox.information(self, "심층 리포트", "데이터가 로드되어 있지 않습니다. 먼저 CSV 파일을 선택하거나 업로드하세요.")
+            return
         # Activate deep report mode
         self.in_deep_report = True
         self.deep_report_inputs = []
@@ -2234,118 +1999,35 @@ class MainWindow(QWidget):
         if self.current_df is None:
             QMessageBox.information(self, "심층 리포트", "데이터가 로드되어 있지 않습니다.")
             return
-        # Prepare summaries for one or multiple datasets
-        dataset_summaries: List[str] = []
-        # If multiple datasets loaded, iterate over them; otherwise use current_df
-        if self.current_dfs:
-            for df_i, name_i in self.current_dfs:
-                # Summarise each dataset individually
-                try:
-                    missing_total_i = int(df_i.isna().sum().sum())
-                except Exception:
-                    missing_total_i = 0
-                try:
-                    desc_df_i = df_i.describe(include="all")
-                    desc_str_i = desc_df_i.to_string(max_cols=6, max_rows=20)
-                except Exception:
-                    desc_str_i = ""
-                try:
-                    preview_df_i = df_i.head(10)
-                    preview_str_i = preview_df_i.to_string(index=False)
-                except Exception:
-                    preview_str_i = ""
-                summary = (
-                    f"[{name_i}]\n"
-                    f"- 총 행수: {len(df_i)}, 총 열수: {df_i.shape[1]}, 결측치 총합: {missing_total_i}\n"
-                    f"- 통계 요약:\n{desc_str_i}\n"
-                    f"- 상위 10행 미리보기:\n{preview_str_i}\n"
-                )
-                dataset_summaries.append(summary)
-            # If more than one dataset, compute comparative statistics across datasets
-            if len(self.current_dfs) > 1:
-                try:
-                    import numpy as _np  # local import to avoid global dependency issues
-                    # Determine common numeric columns across all datasets
-                    numeric_sets = []
-                    for df_i, _name_i in self.current_dfs:
-                        try:
-                            numeric_cols = set(df_i.select_dtypes(include="number").columns)
-                        except Exception:
-                            numeric_cols = set()
-                        numeric_sets.append(numeric_cols)
-                    common_cols = set.intersection(*numeric_sets) if numeric_sets else set()
-                    comparison_lines: List[str] = []
-                    # Limit number of columns to compare for brevity
-                    max_cols_to_compare = 10
-                    col_count = 0
-                    for col in sorted(common_cols):
-                        means = []
-                        for df_i, name_i in self.current_dfs:
-                            try:
-                                mean_val = float(_np.nanmean(_np.asarray(df_i[col], dtype=float)))
-                            except Exception:
-                                mean_val = float('nan')
-                            means.append((name_i, mean_val))
-                        # Remove NaN entries
-                        means_filtered = [(n, m) for n, m in means if m == m]
-                        if len(means_filtered) < 2:
-                            continue
-                        # Sort by mean value descending
-                        means_sorted = sorted(means_filtered, key=lambda x: x[1], reverse=True)
-                        top_name, top_val = means_sorted[0]
-                        bottom_name, bottom_val = means_sorted[-1]
-                        diff_val = top_val - bottom_val
-                        comparison_lines.append(
-                            f"- '{col}' 컬럼 평균: {top_name}({top_val:.3g}) > {bottom_name}({bottom_val:.3g}), 차이 {diff_val:.3g}"
-                        )
-                        col_count += 1
-                        if col_count >= max_cols_to_compare:
-                            break
-                    if comparison_lines:
-                        comparison_text = "\n".join(comparison_lines)
-                        dataset_summaries.append(
-                            "[데이터 간 비교] (공통 숫자 컬럼 평균 비교)\n" + comparison_text + "\n"
-                        )
-                except Exception:
-                    # On any error, silently ignore comparative summary
-                    pass
-        else:
-            # Fallback: use current_df only
-            df = self.current_df
-            try:
-                missing_total = int(df.isna().sum().sum())
-            except Exception:
-                missing_total = 0
-            try:
-                desc_df = df.describe(include="all")
-                desc_str = desc_df.to_string(max_cols=6, max_rows=20)
-            except Exception:
-                desc_str = ""
-            try:
-                preview_df = df.head(10)
-                preview_str = preview_df.to_string(index=False)
-            except Exception:
-                preview_str = ""
-            summary = (
-                f"[{getattr(self, 'selected_dataset_name', '데이터')}]\n"
-                f"- 총 행수: {len(df)}, 총 열수: {df.shape[1]}, 결측치 총합: {missing_total}\n"
-                f"- 통계 요약:\n{desc_str}\n"
-                f"- 상위 10행 미리보기:\n{preview_str}\n"
-            )
-            dataset_summaries.append(summary)
+        df = self.current_df
+        # Compute basic statistics for the report
+        try:
+            missing_total = int(df.isna().sum().sum())
+        except Exception:
+            missing_total = 0
+        try:
+            desc_df = df.describe(include="all")
+            desc_str = desc_df.to_string(max_cols=6, max_rows=20)
+        except Exception:
+            desc_str = ""
+        try:
+            preview_df = df.head(10)
+            preview_str = preview_df.to_string(index=False)
+        except Exception:
+            preview_str = ""
         # Combine user context
         user_context = "\n".join(self.deep_report_inputs).strip()
         if not user_context:
             user_context = "(사용자가 추가 정보를 제공하지 않았습니다.)"
-        # Build overall dataset summary block
-        combined_summary = "\n".join(dataset_summaries)
         # Build prompt for the LLM to generate a deep report
         prompt = (
             "당신은 제조 공정 데이터 분석을 수행하는 전문 리포트 작성자입니다. "
-            "아래 제공된 사용자 입력과 데이터 요약들을 바탕으로 심층 보고서를 작성하세요.\n"
+            "아래 제공된 사용자 입력과 데이터 요약을 바탕으로 심층 보고서를 작성하세요.\n"
             "보고서는 한국어로 작성하며, 각 섹션을 명확한 제목으로 구분하고, 데이터 기반 통찰과 해석, 제한 사항 및 추천을 포함해야 합니다.\n\n"
             f"[사용자 입력]\n{user_context}\n\n"
-            f"[데이터 요약]\n{combined_summary}\n\n"
+            f"[데이터 행/열] 총 행수: {len(df)}, 총 열수: {df.shape[1]}, 결측치 총합: {missing_total}\n\n"
+            f"[통계 요약]\n{desc_str}\n\n"
+            f"[상위 10행 미리보기]\n{preview_str}\n\n"
             "위 정보를 바탕으로 심층 분석 보고서를 작성해주세요."
         )
         # Invoke the LLM to generate the report

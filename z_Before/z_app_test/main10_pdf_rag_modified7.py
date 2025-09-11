@@ -51,11 +51,11 @@ from core.rag_ops import (
 from core.llm_ops import build_llm, build_sql_chain, generate_sql_from_nlq
 from core.plotting import df_to_table, plot_df_line
 from core.files_registry import upsert_entry, load_registry
-from core.analysis_visualizer import AnalysisVisualizer
+from core2.analysis_visualizer import AnalysisVisualizer
 
 # --- pdf_store: 모듈이 없으면 폴백 함수 정의 ---
 try:
-    from core.pdf_store import (
+    from core2.pdf_store import (
     ensure_pdf_tables, insert_pdf, insert_chunks,
     list_chunk_ids_by_doc, fetch_chunks_by_ids, delete_doc, keyword_search_chunks,
     list_all_docs,   # ← 추가
@@ -399,6 +399,8 @@ class MainWindow(QWidget):
         self.in_deep_report: bool = False
         self.deep_report_inputs: List[str] = []
         self.current_df: pd.DataFrame | None = None
+        # For deep report: allow multiple datasets to be loaded
+        self.current_dfs: List[Tuple[pd.DataFrame, str]] = []
 
         # 시뮬 상태/타이머
         self.simulation_timer = QTimer(self)
@@ -451,14 +453,26 @@ class MainWindow(QWidget):
 # app/main10_pdf_rag.py 파일에서 이 함수를 찾아 통째로 교체하세요.
 
     def setup_llm_tab(self):
+        """
+        Construct the UI for the LLM-based CSV analysis page.  This page consists of
+        three primary regions: a file management panel on the left, a chat/input
+        panel in the middle, and a results/visualization panel on the right.  A
+        QSplitter is used between the middle and right regions so the user can
+        interactively resize the chat area versus the results area.  The left
+        panel maintains a fixed width relative to the splitter contents.
+        """
+        # Main horizontal layout for the tab
         layout = QHBoxLayout(self.llm_tab)
-        left, center, right = QVBoxLayout(), QVBoxLayout(), QVBoxLayout()
-        layout.addLayout(left, 2)
-        layout.addLayout(center, 6)
-        layout.addLayout(right, 4)
+        # Create individual layouts for left, center, and right sections
+        left_layout = QVBoxLayout()
+        center_layout = QVBoxLayout()
+        right_layout = QVBoxLayout()
 
-        # ============== 좌측: 파일 관리 (PDF 탭과 동일한 구조로 변경) ==============
-        left.addWidget(QLabel("📁 소스 파일 (RAG 및 SQL 대상)"))
+        # ----------------------------------------------------------------------
+        # Left Panel: file management (CSV selection, upload, delete)
+        # ----------------------------------------------------------------------
+        # Top label
+        left_layout.addWidget(QLabel("📁 소스 파일 (RAG 및 SQL 대상)"))
 
         # (위) 새로 추가 섹션
         box_new = QFrame(); box_new.setFrameShape(QFrame.StyledPanel)
@@ -484,7 +498,7 @@ class MainWindow(QWidget):
         self.csv_new_list = QListWidget() # <-- 에러가 발생했던 'csv_new_list'가 여기서 생성됩니다.
         self.csv_new_list.setToolTip("이번 세션에서 추가한 CSV 파일 목록")
         ln.addWidget(self.csv_new_list, 1)
-        left.addWidget(box_new)
+        left_layout.addWidget(box_new)
 
         # (아래) 저장됨 섹션
         box_saved = QFrame(); box_saved.setFrameShape(QFrame.StyledPanel)
@@ -506,24 +520,28 @@ class MainWindow(QWidget):
         self.csv_saved_list = QListWidget() # <-- 저장된 파일 목록 위젯
         self.csv_saved_list.setToolTip("DB에 저장된 모든 CSV 파일")
         ls.addWidget(self.csv_saved_list, 1)
-        left.addWidget(box_saved, 1)
+        left_layout.addWidget(box_saved, 1)
 
-        # ============== 중앙: 채팅 ==============
-        center.addWidget(QLabel("💬 LLM 질의"))
+        # ----------------------------------------------------------------------
+        # Centre Panel: chat and prompt input
+        # ----------------------------------------------------------------------
+        center_layout.addWidget(QLabel("💬 LLM 질의"))
         tone_row = QHBoxLayout(); tone_row.addWidget(QLabel("톤"))
         self.tone = QComboBox(); self.tone.addItems(["전문", "친근"]); tone_row.addWidget(self.tone)
-        tone_row.addStretch(1); center.addLayout(tone_row)
-        self.chat = ChatView(); center.addWidget(self.chat, 1)
-        self.btn_clear_history = QPushButton("채팅 로그 초기화"); self.btn_clear_history.clicked.connect(self.on_clear_history); center.addWidget(self.btn_clear_history)
+        tone_row.addStretch(1); center_layout.addLayout(tone_row)
+        self.chat = ChatView(); center_layout.addWidget(self.chat, 1)
+        self.btn_clear_history = QPushButton("채팅 로그 초기화"); self.btn_clear_history.clicked.connect(self.on_clear_history); center_layout.addWidget(self.btn_clear_history)
         send_row = QHBoxLayout(); self.inp = QLineEdit(); self.inp.setPlaceholderText("질문을 입력하고 Enter…"); self.inp.returnPressed.connect(self.on_ask)
         self.btn_send = QPushButton("▶"); self.btn_send.clicked.connect(self.on_ask); self.status = QLabel("")
         send_row.addWidget(self.inp, 1); send_row.addWidget(self.btn_send); send_row.addWidget(self.status)
-        center.addLayout(send_row)
+        center_layout.addLayout(send_row)
 
-        # ============== 우측: 결과 ==============
-        right.addWidget(QLabel("📊 LLM 결과/리포트"))
+        # ----------------------------------------------------------------------
+        # Right Panel: results and visualizations
+        # ----------------------------------------------------------------------
+        right_layout.addWidget(QLabel("📊 LLM 결과/리포트"))
         # 결과/리포트 탭 영역
-        self.tabs = QTabWidget(); right.addWidget(self.tabs, 1)
+        self.tabs = QTabWidget(); right_layout.addWidget(self.tabs, 1)
         # (1) 표: SQL 결과를 보여주는 테이블
         self.tbl = QTableWidget()
         self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -531,6 +549,12 @@ class MainWindow(QWidget):
         # (2) 기본 차트: SQL 결과를 간단한 라인 차트로 표시
         self.fig, self.ax = plt.subplots()
         self.canvas = FigureCanvas(self.fig)
+        # Allow the chart canvas to expand within its container for better resizing
+        try:
+            from PyQt5.QtWidgets import QSizePolicy
+            self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
         self.tabs.addTab(self.canvas, "그래프(Chart)")
         # (3) Evidence: SQL 및 RAG 근거, 프리뷰 출력
         self.evidence = QTextEdit()
@@ -552,7 +576,38 @@ class MainWindow(QWidget):
         # (5) 고급 시각화: 2페이지의 분석 결과를 1페이지에서도 볼 수 있도록 하는 탭
         self.adv_fig = plt.figure()
         self.adv_canvas = FigureCanvas(self.adv_fig)
+        # Allow the advanced visualization canvas to expand for better resizing
+        try:
+            from PyQt5.QtWidgets import QSizePolicy
+            self.adv_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
         self.adv_tab_index = self.tabs.addTab(self.adv_canvas, "시각화 결과")
+
+        # (6) 전문가 코멘트: 도메인 지식 메모장 탭
+        self.expert_tab = QWidget()
+        expert_layout = QVBoxLayout(self.expert_tab)
+        # 입력 영역 (여러 줄)
+        self.expert_input = QTextEdit()
+        self.expert_input.setPlaceholderText("전문가의 코멘트를 입력하세요...")
+        expert_layout.addWidget(self.expert_input)
+        # 저장 버튼
+        self.btn_save_expert = QPushButton("저장")
+        self.btn_save_expert.clicked.connect(self.on_save_expert_comment)
+        expert_layout.addWidget(self.btn_save_expert)
+        # 스크롤 영역 내 컨테이너 (저장된 코멘트를 나열)
+        self.expert_scroll = QScrollArea()
+        self.expert_scroll.setWidgetResizable(True)
+        self.expert_container = QWidget()
+        self.expert_container_layout = QVBoxLayout(self.expert_container)
+        self.expert_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.expert_container_layout.setSpacing(4)
+        self.expert_scroll.setWidget(self.expert_container)
+        expert_layout.addWidget(self.expert_scroll, 1)
+        # 탭 추가
+        self.expert_tab_index = self.tabs.addTab(self.expert_tab, "전문가 코멘트")
+        # Populate expert comments from DB
+        QTimer.singleShot(0, self.load_expert_comments)
 
         # 시작 시 저장된 CSV 목록 채우기
         QTimer.singleShot(0, self.refresh_csv_saved_list)
@@ -562,6 +617,24 @@ class MainWindow(QWidget):
             self.csv_saved_list.itemDoubleClicked.connect(self.on_load_saved_csv)
         except Exception:
             pass
+
+        # ----------------------------------------------------------------------
+        # Combine centre and right layouts into widgets and wrap in a splitter
+        # ----------------------------------------------------------------------
+        center_widget = QWidget(); center_widget.setLayout(center_layout)
+        right_widget = QWidget(); right_widget.setLayout(right_layout)
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(center_widget)
+        splitter.addWidget(right_widget)
+        # Set stretch factors so the centre and right panels share space proportionally
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
+        # Add left panel and splitter to the main layout
+        left_widget = QWidget(); left_widget.setLayout(left_layout)
+        # Ensure left panel doesn't collapse; give it a minimum width
+        left_widget.setMinimumWidth(260)
+        layout.addWidget(left_widget)
+        layout.addWidget(splitter, 1)
 
     def setup_viz_tab(self):
         layout = QVBoxLayout(self.viz_tab)
@@ -817,12 +890,66 @@ class MainWindow(QWidget):
         self.images_dir = Path(self.s.vector_db_dir) / "doc_images"
         self.images_dir.mkdir(parents=True, exist_ok=True)
 
+        # 전문가 코멘트 테이블 보장
+        try:
+            with self.engine.begin() as c:
+                # Adjust primary key syntax based on the database dialect
+                dialect = getattr(self.engine, "dialect", None)
+                if dialect and getattr(dialect, "name", "").lower() == "postgresql":
+                    # Use SERIAL for PostgreSQL
+                    ddl = (
+                        "\n"
+                        "CREATE TABLE IF NOT EXISTS expert_comments (\n"
+                        "    id SERIAL PRIMARY KEY,\n"
+                        "    content TEXT NOT NULL,\n"
+                        "    created_at TEXT\n"
+                        ")\n"
+                    )
+                else:
+                    # Use AUTOINCREMENT for SQLite and others that support it
+                    ddl = (
+                        "\n"
+                        "CREATE TABLE IF NOT EXISTS expert_comments (\n"
+                        "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+                        "    content TEXT NOT NULL,\n"
+                        "    created_at TEXT\n"
+                        ")\n"
+                    )
+                c.exec_driver_sql(ddl)
+        except Exception as e:
+            print(f"[expert_comments table init error] {e}")
+
     # LLM 보조
     def build_prompt(self, question: str) -> str:
         full_question = question
+        # Include visualization context if present
         if self.viz_context:
             full_question = f"[Current Analysis Context]\n{self.viz_context}\n\n[User's Question]\n{question}"
             self.viz_context = None
+        # If there are any selected CSV files, prepend their names to the question context
+        try:
+            selected = self.get_selected_filenames()
+        except Exception:
+            selected = []
+        if selected:
+            try:
+                summary = self.get_selected_files_summary()
+            except Exception:
+                summary = ""
+            # Attach summary and list of selected filenames
+            selected_context = "[선택된 데이터 파일 요약]\n" + summary + "\n\n"
+            full_question = selected_context + full_question
+        # Include expert comments from DB as domain knowledge
+        try:
+            with self.engine.begin() as c:
+                rows = c.exec_driver_sql("SELECT content FROM expert_comments").fetchall()
+                exp_comments = [r[0] for r in rows]
+        except Exception:
+            exp_comments = []
+        if exp_comments:
+            comments_str = "\n\n".join(exp_comments)
+            expert_context = "[전문가 코멘트]\n" + comments_str + "\n\n"
+            full_question = expert_context + full_question
         context = "".join(f"이전 Q: {q}\n이전 A: {a}\n" for q, a in self.history[-MAX_HISTORY_TURNS:])
         return context + f"질문: {full_question}"
 
@@ -1169,6 +1296,13 @@ class MainWindow(QWidget):
                 self.deep_report_inputs.append(q)
                 self.chat.add_bot("계속 입력해주세요. 보고서를 완료하려면 '끝' 또는 '완료'라고 입력하세요.")
             return
+        # Attempt to load a dataset from selected files if none is loaded.
+        # This allows analysis and visualization on datasets selected in the saved list
+        # without requiring an explicit upload or double-click.
+        try:
+            self.ensure_dataset_loaded()
+        except Exception:
+            pass
         # Normal LLM processing
         tone = self.tone.currentText()
         self.set_busy(True)
@@ -1240,13 +1374,22 @@ class MainWindow(QWidget):
                     pass
             # Always display evidence text
             self.evidence.setPlainText(evidence_text)
-            # Determine visualization trigger keywords
+            # Determine visualization trigger keywords and parse custom visual requests
             try:
                 query_lower = q.lower()
             except Exception:
                 query_lower = q
             # Trigger appropriate visualization on the LLM page
-            if any(k in query_lower for k in ["상관관계", "correlation"]):
+            # First, try to parse a custom variable request for multi-series or 3D plots
+            vis_request = None
+            try:
+                vis_request = self.parse_visual_request(q)
+            except Exception:
+                vis_request = None
+            if vis_request:
+                vtype, vars_list = vis_request
+                self.show_visualization(vtype, vars_list)
+            elif any(k in query_lower for k in ["상관관계", "correlation"]):
                 # Show correlation dashboard in advanced tab
                 self.show_visualization('correlation')
             elif any(k in query_lower for k in ["3d", "경로", "path"]):
@@ -1258,6 +1401,9 @@ class MainWindow(QWidget):
             elif any(k in query_lower for k in ["a*w", "aw"]):
                 # Notify that AW dashboard is only available in the viz tab
                 self.show_visualization('aw')
+            elif ("mpt" in query_lower or "m.p.t" in query_lower) and any(k in query_lower for k in ["시간", "time"]):
+                # Plot MPT vs Time if both keywords present
+                self.show_visualization('mpt_time')
             # If no advanced visualization was triggered, select the most appropriate results tab
             if not self._advanced_triggered:
                 # Prefer table view if a DataFrame result exists
@@ -1827,6 +1973,388 @@ class MainWindow(QWidget):
             self.inp.setText("이 분석 결과가 의미하는 바를 해석하고, 공정 개선을 위한 제안 3가지를 해줘.")
             self.inp.setFocus()
 
+        # Ensure dataset is loaded from selection if not already
+        # (used when the user directly asks to analyze or interpret current visualization)
+        try:
+            self.ensure_dataset_loaded()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # 전문가 코멘트 관리 메서드들
+    def load_expert_comments(self):
+        """
+        Load expert comments from the database and populate the expert comments tab.
+        Each comment will be displayed with a delete (X) button.
+        """
+        # Clear existing UI items
+        layout = self.expert_container_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        # Fetch comments from DB
+        comments = []
+        try:
+            with self.engine.begin() as c:
+                rows = c.exec_driver_sql("SELECT id, content FROM expert_comments ORDER BY id").fetchall()
+                comments = [(int(r[0]), r[1]) for r in rows]
+        except Exception as e:
+            print(f"[load_expert_comments error] {e}")
+        # Populate UI
+        for cid, text in comments:
+            fr = QFrame()
+            fr.setFrameShape(QFrame.StyledPanel)
+            h_layout = QHBoxLayout(fr)
+            h_layout.setContentsMargins(4, 4, 4, 4)
+            lab = QLabel(text)
+            lab.setWordWrap(True)
+            h_layout.addWidget(lab, 1)
+            btn_del = QPushButton("✕")
+            btn_del.setFixedWidth(24)
+            btn_del.setStyleSheet("color: red; font-weight: bold;")
+            # Use lambda to capture comment id
+            btn_del.clicked.connect(lambda _, cid=cid: self.on_delete_expert_comment(cid))
+            h_layout.addWidget(btn_del)
+            layout.addWidget(fr)
+        # Add stretch to push items to top
+        layout.addStretch(1)
+
+    def on_save_expert_comment(self):
+        """
+        Save the content of expert_input to the database as a new expert comment,
+        if it is not empty.
+        """
+        content = self.expert_input.toPlainText().strip()
+        if not content:
+            QMessageBox.information(self, "입력 필요", "코멘트를 입력한 뒤 저장하세요.")
+            return
+        try:
+            from datetime import datetime
+            now = datetime.utcnow().isoformat()
+        except Exception:
+            now = None
+        try:
+            with self.engine.begin() as c:
+                # psycopg2 (PostgreSQL) doesn't accept ':' parameters; choose param style based on dialect
+                dialect = getattr(self.engine, "dialect", None)
+                # Default to SQLite/qmark style
+                if dialect and getattr(dialect, "name", "").lower() == "postgresql":
+                    # Use Postgres pyformat (positional) placeholders
+                    stmt = "INSERT INTO expert_comments (content, created_at) VALUES (%s, %s)"
+                    params = (content, now)
+                else:
+                    # Use qmark style placeholders (e.g. SQLite)
+                    stmt = "INSERT INTO expert_comments (content, created_at) VALUES (?, ?)"
+                    params = (content, now)
+                c.exec_driver_sql(stmt, params)
+            # Clear input after saving
+            self.expert_input.clear()
+            # Refresh list
+            self.load_expert_comments()
+            QMessageBox.information(self, "저장", "코멘트가 저장되었습니다.")
+        except Exception as e:
+            QMessageBox.warning(self, "저장 실패", f"코멘트를 저장할 수 없습니다: {e}")
+
+    def on_delete_expert_comment(self, comment_id: int):
+        """
+        Delete an expert comment from the database and update the UI.
+        """
+        # Confirm deletion
+        resp = QMessageBox.question(
+            self, "삭제 확인", "정말 이 코멘트를 삭제하시겠습니까?", QMessageBox.Yes | QMessageBox.No
+        )
+        if resp != QMessageBox.Yes:
+            return
+        try:
+            with self.engine.begin() as c:
+                dialect = getattr(self.engine, "dialect", None)
+                # Build deletion statement based on DB dialect
+                if dialect and getattr(dialect, "name", "").lower() == "postgresql":
+                    stmt = "DELETE FROM expert_comments WHERE id = %s"
+                    params = (comment_id,)
+                else:
+                    stmt = "DELETE FROM expert_comments WHERE id = ?"
+                    params = (comment_id,)
+                c.exec_driver_sql(stmt, params)
+            # Refresh list
+            self.load_expert_comments()
+        except Exception as e:
+            QMessageBox.warning(self, "삭제 실패", f"코멘트를 삭제할 수 없습니다: {e}")
+
+    # ------------------------------------------------------------------
+    # 선택된 CSV 파일 명단을 반환
+    def get_selected_filenames(self) -> List[str]:
+        """
+        Return a list of filenames selected by the user. An item is considered selected if its checkbox
+        is ticked or if the row is highlighted (selected) in the list. This makes it more convenient
+        for the user to simply click a row without checking the box to select a dataset.
+        """
+        names: List[str] = []
+        # Helper to extract names from a given QListWidget
+        def collect_names(lst: QListWidget | None):
+            if not lst:
+                return
+            for i in range(lst.count()):
+                it = lst.item(i)
+                if not it:
+                    continue
+                # Determine if the item is checked
+                try:
+                    checked = (it.checkState() == Qt.Checked)
+                except Exception:
+                    checked = False
+                # Determine if the item is selected (highlighted)
+                selected = False
+                try:
+                    selected = it.isSelected()
+                except Exception:
+                    selected = False
+                # If either checked or selected, include this filename
+                if checked or selected:
+                    try:
+                        fname = it.data(Qt.UserRole) or it.text().split(' ')[0]
+                    except Exception:
+                        fname = None
+                    if fname:
+                        names.append(fname)
+        # Collect from new and saved lists
+        collect_names(getattr(self, 'csv_new_list', None))
+        collect_names(getattr(self, 'csv_saved_list', None))
+        # If no names found via checked/selected items, fall back to the current item in each list
+        if not names:
+            for lst in (getattr(self, 'csv_new_list', None), getattr(self, 'csv_saved_list', None)):
+                try:
+                    current = lst.currentItem() if lst else None
+                except Exception:
+                    current = None
+                if current:
+                    try:
+                        fname = current.data(Qt.UserRole) or current.text().split(' ')[0]
+                    except Exception:
+                        fname = None
+                    if fname:
+                        names.append(fname)
+                        break
+        return names
+
+    def ensure_dataset_loaded(self) -> bool:
+        """
+        Ensure that a dataset is loaded into current_df and visualizer. If none are loaded yet,
+        attempt to load the first selected dataset from the registry or database. Returns
+        True if a dataset is loaded after this call, False otherwise.
+        """
+        # If we already have a dataset loaded and a visualizer, nothing to do
+        if getattr(self, "current_df", None) is not None and getattr(self, "visualizer", None) is not None:
+            return True
+        # If there is no loaded dataset but there is a previously rendered DataFrame (last_df),
+        # use it as the current dataset.  This allows advanced visualizations to operate on
+        # the most recent LLM query results even if the user has not explicitly selected a file.
+        try:
+            if getattr(self, "last_df", None) is not None and isinstance(self.last_df, pd.DataFrame) and not self.last_df.empty:
+                # Set current_df and df_viz to the last result
+                self.current_df = self.last_df
+                self.df_viz = self.last_df
+                try:
+                    self.visualizer = AnalysisVisualizer(self.last_df)
+                except Exception:
+                    self.visualizer = None
+                # Record a placeholder name for prompts
+                if not getattr(self, "selected_dataset_name", None):
+                    self.selected_dataset_name = "recent_query"
+                return True
+        except Exception:
+            pass
+        # Try to load from selected filenames (checkboxes)
+        try:
+            selected_names = self.get_selected_filenames()
+        except Exception:
+            selected_names = []
+        # No selected data, cannot load
+        if not selected_names:
+            return False
+        # Loop through selected names and load the first valid dataset
+        for fname in selected_names:
+            path_str = None
+            # Determine file path from registry via file_id
+            try:
+                file_id = self.file_ids.get(fname)
+            except Exception:
+                file_id = None
+            if file_id:
+                try:
+                    entries = load_registry()
+                    entry = entries.get(file_id)
+                    if entry and entry.get("path"):
+                        path_str = entry["path"]
+                except Exception:
+                    pass
+            df_loaded = None
+            # Try to load from file
+            if path_str and os.path.exists(path_str):
+                try:
+                    # Use load_and_meta for consistency (standardize columns)
+                    df_loaded, meta, _ = load_and_meta(Path(path_str), self.s.meta_json_dir)
+                except Exception:
+                    try:
+                        df_loaded = pd.read_csv(path_str)
+                    except Exception:
+                        df_loaded = None
+            # Fallback: load from SQL table
+            if df_loaded is None:
+                table = table_name_from_file(fname)
+                try:
+                    df_loaded = run_sql(self.engine, f'SELECT * FROM "{table}"')
+                except Exception:
+                    df_loaded = None
+            if isinstance(df_loaded, pd.DataFrame) and not df_loaded.empty:
+                # Set current_df, df_viz and visualizer
+                try:
+                    self.current_df = df_loaded
+                    self.df_viz = df_loaded
+                    try:
+                        self.visualizer = AnalysisVisualizer(df_loaded)
+                    except Exception:
+                        self.visualizer = None
+                    # Also update selected_dataset_name for prompts
+                    self.selected_dataset_name = fname
+                except Exception:
+                    pass
+                break
+        # Return True if loaded
+        return getattr(self, "current_df", None) is not None and getattr(self, "visualizer", None) is not None
+
+    def get_selected_files_summary(self) -> str:
+        """
+        Build a human-readable summary of the selected CSV files using their
+        metadata (rows and columns) from the registry. If registry data is
+        unavailable, uses a placeholder.
+        """
+        names = self.get_selected_filenames()
+        if not names:
+            return ""
+        summary_lines: List[str] = []
+        try:
+            entries = load_registry()
+        except Exception:
+            entries = {}
+        for fname in names:
+            file_id = self.file_ids.get(fname)
+            rows = cols = None
+            if file_id and entries:
+                data = entries.get(file_id)
+                if data:
+                    rows = data.get("rows")
+                    cols = data.get("cols")
+            if rows is not None and cols is not None:
+                summary_lines.append(f"- {fname}: {rows}행 × {cols}열")
+            else:
+                summary_lines.append(f"- {fname}: (요약 정보 없음)")
+        return "\n".join(summary_lines)
+
+    # ------------------------------------------------------------------
+    # Parse user query for custom visualization requests
+    def parse_visual_request(self, query: str) -> Tuple[str, List[str]] | None:
+        """
+        Analyze the user's query and determine if it requests a custom visualization using
+        multiple variables. Returns a tuple (viz_type, variables) where viz_type is one of:
+
+          - 'custom_3d': for 3D scatter/line plots with three variables (x, y, z)
+          - 'custom_time': for multi-series line charts vs. time (first variable should be time)
+
+        If the query does not match a custom visual request, returns None.
+
+        Example queries:
+            '시간, MPT, r_LP 3차원 시각화' -> ('custom_3d', ['time', 'mpt', 'r_lp'])
+            '전체 시간에 대해 MPT, R_RS 그래프를 그려줘' -> ('custom_time', ['time','mpt','r_rs'])
+        """
+        if not isinstance(query, str) or not query.strip():
+            return None
+        lower = query.lower()
+        # Determine if the user requested a 3D visualization
+        is_3d = False
+        for kw in ["3d", "3차원", "3d", "three-dimensional", "3차원 시각화", "3d plot", "3d 시각화"]:
+            if kw in lower:
+                is_3d = True
+                break
+        # Tokenize the query into potential variable names (alphanumerics, Hangul, and underscores)
+        import re
+        tokens = re.findall(r"[a-zA-Z0-9가-힣_]+", query)
+        # Build mapping of lower-case standardized column names to original
+        if getattr(self, "current_df", None) is None:
+            return None
+        col_map = {c.lower(): c for c in self.current_df.columns}
+        # Define simple synonym mapping for commonly used Korean terms
+        # to their corresponding column names (in lower-case) when present.
+        synonyms = {
+            "시간": "time",  # time column
+            "타임": "time",
+            "시각": "time",
+            "타임스탬프": "time",
+            "mpt": "mpt",  # melt pool temperature (if written in lower-case)
+            "mpa": "mpa",
+            "mpw": "mpw",
+        }
+        variables: List[str] = []
+        # Helper to add variable if it matches a column
+        def try_add_var(tok: str):
+            """
+            Attempt to map a token to an existing DataFrame column.  The search
+            considers exact matches, normalized matches (underscores removed),
+            substring matches, and user-defined synonyms for Korean terms.  The
+            result is appended to the variables list if found.
+            """
+            raw = tok.strip()
+            if not raw:
+                return
+            # Check for synonym mapping (case-sensitive for Korean terms)
+            if raw in synonyms:
+                mapped = synonyms[raw]
+                # Use lower-case version of the mapped column name to find in col_map
+                lc = mapped.lower()
+                if lc in col_map:
+                    variables.append(col_map[lc])
+                    return
+            t = raw.lower()
+            # Try exact match
+            if t in col_map:
+                variables.append(col_map[t])
+                return
+            # Try removing underscores or hyphens for both token and columns
+            t_mod = t.replace("_", "").replace("-", "")
+            for key in col_map:
+                key_mod = key.replace("_", "").replace("-", "")
+                if key_mod == t_mod:
+                    variables.append(col_map[key])
+                    return
+            # As a last resort, check if token is a substring of any column name
+            for key in col_map:
+                if t in key:
+                    variables.append(col_map[key])
+                    return
+        # Extract potential variable names from tokens
+        for tok in tokens:
+            try_add_var(tok)
+        # Remove duplicates while preserving order
+        seen = set()
+        variables = [x for x in variables if not (x.lower() in seen or seen.add(x.lower()))]
+        # Determine type based on presence of variables and 3D flag
+        if is_3d and len(variables) >= 3:
+            # Use the first three variables
+            return ("custom_3d", variables[:3])
+        # For multi-series line vs time: require at least one time-like and one other variable
+        # Identify time-like columns among variables
+        time_like = [v for v in variables if any(k in v.lower() for k in ["time", "date", "datetime", "ts"])]
+        if time_like and len(variables) >= 2:
+            # Ensure the time variable is first in the list
+            time_col = time_like[0]
+            # Put time_col first and the rest afterwards (preserve order)
+            ordered = [time_col] + [v for v in variables if v != time_col]
+            return ("custom_time", ordered)
+        # No custom visualization pattern detected
+        return None
+
     # ------------------------------------------------------------------
     # 새로운 기능: 저장된 CSV 더블클릭으로 로딩
     def on_load_saved_csv(self, item):
@@ -1908,8 +2436,75 @@ class MainWindow(QWidget):
         Initiate deep report mode. Prompt the user to provide context for an in-depth report.
         """
         if self.current_df is None:
-            QMessageBox.information(self, "심층 리포트", "데이터가 로드되어 있지 않습니다. 먼저 CSV 파일을 선택하거나 업로드하세요.")
-            return
+            # If no dataset is loaded, attempt to load all selected files
+            try:
+                selected = self.get_selected_filenames()
+            except Exception:
+                selected = []
+            if selected:
+                # Reset current_dfs list
+                self.current_dfs = []
+                for fname in selected:
+                    # Attempt to load DataFrame (similar to on_load_saved_csv logic)
+                    path_str = None
+                    file_id = self.file_ids.get(fname)
+                    if file_id:
+                        try:
+                            entries = load_registry()
+                            entry = entries.get(file_id)
+                            if entry and entry.get("path"):
+                                path_str = entry["path"]
+                        except Exception:
+                            pass
+                    df_loaded = None
+                    if path_str and os.path.exists(path_str):
+                        try:
+                            df_loaded, meta, _ = load_and_meta(Path(path_str), self.s.meta_json_dir)
+                        except Exception:
+                            try:
+                                df_loaded = pd.read_csv(path_str)
+                            except Exception:
+                                df_loaded = None
+                    if df_loaded is None:
+                        # Fallback to DB table
+                        try:
+                            table = table_name_from_file(fname)
+                            df_loaded = run_sql(self.engine, f'SELECT * FROM "{table}"')
+                        except Exception:
+                            df_loaded = None
+                    if isinstance(df_loaded, pd.DataFrame) and not df_loaded.empty:
+                        self.current_dfs.append((df_loaded, fname))
+                # If at least one dataset loaded, set current_df to the first and update visualizer
+                if self.current_dfs:
+                    # Use the first loaded dataset as current_df for visualization
+                    first_df, first_name = self.current_dfs[0]
+                    self.current_df = first_df
+                    self.df_viz = self.current_df
+                    try:
+                        self.visualizer = AnalysisVisualizer(self.current_df)
+                    except Exception:
+                        self.visualizer = None
+                    # Update viz tab UI to indicate the first file loaded
+                    try:
+                        self._stop_simulation_if_running()
+                        self.sim_controls_widget.hide()
+                        self.viz_stack.setCurrentIndex(0)
+                        self.viz_fig.clear()
+                        ax = self.viz_fig.add_subplot(111)
+                        ax.text(0.5, 0.5, f"'{first_name}' loaded.\nPlease select an analysis.", ha='center', va='center')
+                        ax.axis('off')
+                        self.viz_canvas.draw()
+                        for btn in [self.btn_run_stability, self.btn_run_correlation, self.btn_run_3d_path,
+                                    self.btn_run_simulation, self.btn_run_integrated, self.btn_run_aw_volume]:
+                            btn.setEnabled(True)
+                        self.btn_ask_llm_about_viz.setEnabled(False)
+                    except Exception:
+                        pass
+            # If still no dataset loaded, notify and abort
+            if self.current_df is None:
+                QMessageBox.information(
+                    self, "심층 리포트", "데이터가 로드되어 있지 않습니다. 먼저 CSV 파일을 선택하거나 업로드하세요.")
+                return
         # Activate deep report mode
         self.in_deep_report = True
         self.deep_report_inputs = []
@@ -1931,35 +2526,118 @@ class MainWindow(QWidget):
         if self.current_df is None:
             QMessageBox.information(self, "심층 리포트", "데이터가 로드되어 있지 않습니다.")
             return
-        df = self.current_df
-        # Compute basic statistics for the report
-        try:
-            missing_total = int(df.isna().sum().sum())
-        except Exception:
-            missing_total = 0
-        try:
-            desc_df = df.describe(include="all")
-            desc_str = desc_df.to_string(max_cols=6, max_rows=20)
-        except Exception:
-            desc_str = ""
-        try:
-            preview_df = df.head(10)
-            preview_str = preview_df.to_string(index=False)
-        except Exception:
-            preview_str = ""
+        # Prepare summaries for one or multiple datasets
+        dataset_summaries: List[str] = []
+        # If multiple datasets loaded, iterate over them; otherwise use current_df
+        if self.current_dfs:
+            for df_i, name_i in self.current_dfs:
+                # Summarise each dataset individually
+                try:
+                    missing_total_i = int(df_i.isna().sum().sum())
+                except Exception:
+                    missing_total_i = 0
+                try:
+                    desc_df_i = df_i.describe(include="all")
+                    desc_str_i = desc_df_i.to_string(max_cols=6, max_rows=20)
+                except Exception:
+                    desc_str_i = ""
+                try:
+                    preview_df_i = df_i.head(10)
+                    preview_str_i = preview_df_i.to_string(index=False)
+                except Exception:
+                    preview_str_i = ""
+                summary = (
+                    f"[{name_i}]\n"
+                    f"- 총 행수: {len(df_i)}, 총 열수: {df_i.shape[1]}, 결측치 총합: {missing_total_i}\n"
+                    f"- 통계 요약:\n{desc_str_i}\n"
+                    f"- 상위 10행 미리보기:\n{preview_str_i}\n"
+                )
+                dataset_summaries.append(summary)
+            # If more than one dataset, compute comparative statistics across datasets
+            if len(self.current_dfs) > 1:
+                try:
+                    import numpy as _np  # local import to avoid global dependency issues
+                    # Determine common numeric columns across all datasets
+                    numeric_sets = []
+                    for df_i, _name_i in self.current_dfs:
+                        try:
+                            numeric_cols = set(df_i.select_dtypes(include="number").columns)
+                        except Exception:
+                            numeric_cols = set()
+                        numeric_sets.append(numeric_cols)
+                    common_cols = set.intersection(*numeric_sets) if numeric_sets else set()
+                    comparison_lines: List[str] = []
+                    # Limit number of columns to compare for brevity
+                    max_cols_to_compare = 10
+                    col_count = 0
+                    for col in sorted(common_cols):
+                        means = []
+                        for df_i, name_i in self.current_dfs:
+                            try:
+                                mean_val = float(_np.nanmean(_np.asarray(df_i[col], dtype=float)))
+                            except Exception:
+                                mean_val = float('nan')
+                            means.append((name_i, mean_val))
+                        # Remove NaN entries
+                        means_filtered = [(n, m) for n, m in means if m == m]
+                        if len(means_filtered) < 2:
+                            continue
+                        # Sort by mean value descending
+                        means_sorted = sorted(means_filtered, key=lambda x: x[1], reverse=True)
+                        top_name, top_val = means_sorted[0]
+                        bottom_name, bottom_val = means_sorted[-1]
+                        diff_val = top_val - bottom_val
+                        comparison_lines.append(
+                            f"- '{col}' 컬럼 평균: {top_name}({top_val:.3g}) > {bottom_name}({bottom_val:.3g}), 차이 {diff_val:.3g}"
+                        )
+                        col_count += 1
+                        if col_count >= max_cols_to_compare:
+                            break
+                    if comparison_lines:
+                        comparison_text = "\n".join(comparison_lines)
+                        dataset_summaries.append(
+                            "[데이터 간 비교] (공통 숫자 컬럼 평균 비교)\n" + comparison_text + "\n"
+                        )
+                except Exception:
+                    # On any error, silently ignore comparative summary
+                    pass
+        else:
+            # Fallback: use current_df only
+            df = self.current_df
+            try:
+                missing_total = int(df.isna().sum().sum())
+            except Exception:
+                missing_total = 0
+            try:
+                desc_df = df.describe(include="all")
+                desc_str = desc_df.to_string(max_cols=6, max_rows=20)
+            except Exception:
+                desc_str = ""
+            try:
+                preview_df = df.head(10)
+                preview_str = preview_df.to_string(index=False)
+            except Exception:
+                preview_str = ""
+            summary = (
+                f"[{getattr(self, 'selected_dataset_name', '데이터')}]\n"
+                f"- 총 행수: {len(df)}, 총 열수: {df.shape[1]}, 결측치 총합: {missing_total}\n"
+                f"- 통계 요약:\n{desc_str}\n"
+                f"- 상위 10행 미리보기:\n{preview_str}\n"
+            )
+            dataset_summaries.append(summary)
         # Combine user context
         user_context = "\n".join(self.deep_report_inputs).strip()
         if not user_context:
             user_context = "(사용자가 추가 정보를 제공하지 않았습니다.)"
+        # Build overall dataset summary block
+        combined_summary = "\n".join(dataset_summaries)
         # Build prompt for the LLM to generate a deep report
         prompt = (
             "당신은 제조 공정 데이터 분석을 수행하는 전문 리포트 작성자입니다. "
-            "아래 제공된 사용자 입력과 데이터 요약을 바탕으로 심층 보고서를 작성하세요.\n"
+            "아래 제공된 사용자 입력과 데이터 요약들을 바탕으로 심층 보고서를 작성하세요.\n"
             "보고서는 한국어로 작성하며, 각 섹션을 명확한 제목으로 구분하고, 데이터 기반 통찰과 해석, 제한 사항 및 추천을 포함해야 합니다.\n\n"
             f"[사용자 입력]\n{user_context}\n\n"
-            f"[데이터 행/열] 총 행수: {len(df)}, 총 열수: {df.shape[1]}, 결측치 총합: {missing_total}\n\n"
-            f"[통계 요약]\n{desc_str}\n\n"
-            f"[상위 10행 미리보기]\n{preview_str}\n\n"
+            f"[데이터 요약]\n{combined_summary}\n\n"
             "위 정보를 바탕으로 심층 분석 보고서를 작성해주세요."
         )
         # Invoke the LLM to generate the report
@@ -1980,20 +2658,29 @@ class MainWindow(QWidget):
             self.tabs.setCurrentIndex(idx)
 
     # 고급 시각화 처리
-    def show_visualization(self, viz_type: str):
+    def show_visualization(self, viz_type: str, variables: List[str] | None = None):
         """
         Generate and display advanced visualizations in the LLM results area based on the
-        provided viz_type. Uses self.visualizer and self.current_df.
+        provided viz_type and optional variables list. Uses self.visualizer and self.current_df.
 
         Supported viz_type values:
           - 'correlation': 상관관계 대시보드
           - '3d': 3D 경로 (정적)
           - 'simulation': 공정 시뮬레이션 (메시지로 안내)
           - 'aw': A*W 적층 부피 (메시지로 안내)
+          - 'mpt_time': 시간 대비 MPT 변화 그래프
+          - 'custom_time': multi-series line chart with a time column and multiple numeric y variables (variables param)
+          - 'custom_3d': 3D scatter plot using three variables for x, y, z axes (variables param)
           - other: 메시지로 안내
         """
-        # Ensure there is a dataset to visualize
-        if self.visualizer is None or self.current_df is None:
+        # Ensure there is a dataset to visualize. If none loaded, attempt to load from selected data.
+        try:
+            if not self.ensure_dataset_loaded():
+                # Still no dataset; notify the user
+                QMessageBox.information(self, "시각화", "먼저 CSV 파일을 선택하거나 업로드하여 분석을 진행하세요.")
+                return
+        except Exception:
+            # On error, fallback to user message
             QMessageBox.information(self, "시각화", "먼저 CSV 파일을 선택하거나 업로드하여 분석을 진행하세요.")
             return
         # Clear existing figure
@@ -2018,7 +2705,264 @@ class MainWindow(QWidget):
                 ax = self.adv_fig.add_subplot(111)
                 ax.text(0.5, 0.5, "A*W 대시보드는 시각화 탭에서 실행할 수 있습니다.", ha='center', va='center')
                 ax.axis('off')
+            elif viz_type == 'mpt_time':
+                # Draw MPT vs Time line chart using relative time in seconds
+                # Find columns for time and MPT using flexible substring matching
+                # Build a lowercase mapping for quick lookup
+                cols_lower = {c.lower(): c for c in self.current_df.columns}
+                # Determine a time-like column: exact match or containing keywords
+                time_col = None
+                # First try common names
+                for cand in ["time", "timestamp", "date", "datetime", "ts"]:
+                    if cand in cols_lower:
+                        time_col = cols_lower[cand]
+                        break
+                # If not found, search for any column containing 'time' or 'date'
+                if time_col is None:
+                    for c in self.current_df.columns:
+                        cl = c.lower()
+                        if 'time' in cl or 'date' in cl or 'ts' in cl:
+                            time_col = c
+                            break
+                # Determine MPT-like column: exact or containing 'mpt'
+                mpt_col = None
+                # Try common names
+                for cand in ["mpt", "mp_t", "mp.t", "m.p.t", "mpttemp"]:
+                    if cand in cols_lower:
+                        mpt_col = cols_lower.get(cand)
+                        if mpt_col:
+                            break
+                # Search for any column containing 'mpt'
+                if mpt_col is None:
+                    for c in self.current_df.columns:
+                        if 'mpt' in c.lower():
+                            mpt_col = c
+                            break
+                if not time_col or not mpt_col:
+                    ax = self.adv_fig.add_subplot(111)
+                    ax.text(0.5, 0.5, "'time' 또는 'MPT' 관련 컬럼을 찾을 수 없어 그래프를 그릴 수 없습니다.", ha='center', va='center')
+                    ax.axis('off')
+                else:
+                    # Parse time column with custom logic: treat last 3 digits as ms for strings of pattern
+                    def parse_custom_time(s: str):
+                        # Handles strings like MM_DD_HH_MM_SS_MMM (ms)
+                        if isinstance(s, str):
+                            parts = s.split('_')
+                            if len(parts) == 6 and len(parts[-1]) == 3 and parts[-1].isdigit():
+                                s_mod = '_'.join(parts[:-1] + [parts[-1] + '000'])
+                                try:
+                                    return pd.to_datetime(s_mod, format="%m_%d_%H_%M_%S_%f")
+                                except Exception:
+                                    pass
+                        try:
+                            return pd.to_datetime(s)
+                        except Exception:
+                            return pd.NaT
+                    t_series_raw = self.current_df[time_col]
+                    # Use existing datetime if dtype is datetime, otherwise parse
+                    if pd.api.types.is_datetime64_any_dtype(t_series_raw):
+                        t_series = t_series_raw
+                    else:
+                        # Parse each element
+                        t_series = t_series_raw.apply(parse_custom_time)
+                    # Validate times and MPT values
+                    valid_mask = t_series.notna()
+                    mpt_series = pd.to_numeric(self.current_df.loc[valid_mask, mpt_col], errors="coerce")
+                    t_series = t_series[valid_mask]
+                    mpt_series = mpt_series[~mpt_series.isna()]
+                    # Align time and mpt lengths (drop NaN mpt values)
+                    if len(mpt_series) != len(t_series):
+                        # Align index
+                        common_index = t_series.index.intersection(mpt_series.index)
+                        t_series = t_series.loc[common_index]
+                        mpt_series = mpt_series.loc[common_index]
+                    # Need at least two points
+                    if len(t_series) < 2:
+                        ax = self.adv_fig.add_subplot(111)
+                        ax.text(0.5, 0.5, "유효한 시간 데이터가 충분하지 않습니다.", ha='center', va='center')
+                        ax.axis('off')
+                    else:
+                        # Compute elapsed seconds relative to start
+                        try:
+                            elapsed = (t_series - t_series.iloc[0]).dt.total_seconds()
+                        except Exception:
+                            elapsed = None
+                        if elapsed is None:
+                            ax = self.adv_fig.add_subplot(111)
+                            ax.text(0.5, 0.5, "시간 데이터를 해석할 수 없습니다.", ha='center', va='center')
+                            ax.axis('off')
+                        else:
+                            ax = self.adv_fig.add_subplot(111)
+                            ax.plot(elapsed, mpt_series.reset_index(drop=True), marker='o')
+                            ax.set_xlabel("Elapsed time (s)")
+                            ax.set_ylabel("MPT")
+                            ax.set_title("MPT vs Time")
+                            ax.grid(True)
+            elif viz_type == 'custom_time':
+                # Multi-series line chart versus time for user-selected variables
+                # variables[0] should be time, rest are y variables
+                if not variables or len(variables) < 2:
+                    ax = self.adv_fig.add_subplot(111)
+                    ax.text(0.5, 0.5, "적절한 변수 목록이 없어 시각화할 수 없습니다.", ha='center', va='center')
+                    ax.axis('off')
+                else:
+                    time_col = variables[0]
+                    y_vars = variables[1:]
+                    # Build time series using parse_custom_time similar to MPT
+                    def parse_custom_time(s: str):
+                        if isinstance(s, str):
+                            parts = s.split('_')
+                            if len(parts) == 6 and len(parts[-1]) == 3 and parts[-1].isdigit():
+                                s_mod = '_'.join(parts[:-1] + [parts[-1] + '000'])
+                                try:
+                                    return pd.to_datetime(s_mod, format="%m_%d_%H_%M_%S_%f")
+                                except Exception:
+                                    pass
+                        try:
+                            return pd.to_datetime(s)
+                        except Exception:
+                            return pd.NaT
+                    try:
+                        t_series_raw = self.current_df[time_col]
+                    except Exception:
+                        t_series_raw = None
+                    if t_series_raw is None:
+                        ax = self.adv_fig.add_subplot(111)
+                        ax.text(0.5, 0.5, "시간 변수를 찾을 수 없어 시각화할 수 없습니다.", ha='center', va='center')
+                        ax.axis('off')
+                    else:
+                        if pd.api.types.is_datetime64_any_dtype(t_series_raw):
+                            t_series = t_series_raw
+                        else:
+                            t_series = t_series_raw.apply(parse_custom_time)
+                        # Use relative seconds if datetime, else numeric directly
+                        elapsed = None
+                        if pd.api.types.is_datetime64_any_dtype(t_series):
+                            try:
+                                elapsed = (t_series - t_series.iloc[0]).dt.total_seconds()
+                            except Exception:
+                                elapsed = None
+                        if elapsed is None:
+                            try:
+                                elapsed = pd.to_numeric(t_series, errors='coerce')
+                            except Exception:
+                                elapsed = None
+                        if elapsed is None or elapsed.dropna().size < 2:
+                            ax = self.adv_fig.add_subplot(111)
+                            ax.text(0.5, 0.5, "시간 변수를 해석할 수 없거나 데이터가 부족합니다.", ha='center', va='center')
+                            ax.axis('off')
+                        else:
+                            ax = self.adv_fig.add_subplot(111)
+                            for var in y_vars:
+                                try:
+                                    y = pd.to_numeric(self.current_df[var], errors='coerce')
+                                except Exception:
+                                    y = None
+                                if y is None:
+                                    continue
+                                # Align length
+                                common_index = elapsed.dropna().index.intersection(y.dropna().index)
+                                if len(common_index) < 2:
+                                    continue
+                                ax.plot(elapsed.loc[common_index], y.loc[common_index], marker='o', label=var)
+                            if not ax.lines:
+                                ax.text(0.5, 0.5, "유효한 y 변수가 없어 그래프를 그릴 수 없습니다.", ha='center', va='center')
+                                ax.axis('off')
+                            else:
+                                ax.set_xlabel("Elapsed time (s)")
+                                # Y-axis label omitted to avoid font issues; individual lines have legends
+                                title = " vs Time: " + ", ".join(y_vars)
+                                ax.set_title(title)
+                                ax.legend()
+                                ax.grid(True)
+            elif viz_type == 'custom_3d':
+                # 3D surface and contour visualizations using three variables (x, y, z)
+                if not variables or len(variables) < 3:
+                    ax = self.adv_fig.add_subplot(111)
+                    ax.text(0.5, 0.5, "3개 이상의 변수가 필요합니다.", ha='center', va='center')
+                    ax.axis('off')
+                else:
+                    x_var, y_var, z_var = variables[:3]
+                    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (for 3D projection)
+                    from matplotlib.tri import Triangulation
+                    try:
+                        x_raw = self.current_df[x_var]
+                        y_raw = self.current_df[y_var]
+                        z_raw = self.current_df[z_var]
+                    except Exception:
+                        x_raw = y_raw = z_raw = None
+                    if x_raw is None or y_raw is None or z_raw is None:
+                        ax = self.adv_fig.add_subplot(111)
+                        ax.text(0.5, 0.5, "지정한 변수를 찾을 수 없습니다.", ha='center', va='center')
+                        ax.axis('off')
+                    else:
+                        # Convert variables to numeric values; treat x as time-like if needed
+                        def convert_series(s, is_time=False):
+                            # Helper to convert series to numeric; if time-like, convert datetime to elapsed seconds
+                            if is_time:
+                                if pd.api.types.is_datetime64_any_dtype(s):
+                                    try:
+                                        return (s - s.iloc[0]).dt.total_seconds()
+                                    except Exception:
+                                        return pd.to_numeric(s, errors='coerce')
+                                # Try parsing time strings
+                                parsed = s.apply(lambda x: pd.to_datetime(x) if isinstance(x, str) else pd.NaT)
+                                if parsed.notna().mean() > 0.5:
+                                    try:
+                                        return (parsed - parsed.iloc[0]).dt.total_seconds()
+                                    except Exception:
+                                        return pd.to_numeric(s, errors='coerce')
+                                return pd.to_numeric(s, errors='coerce')
+                            else:
+                                return pd.to_numeric(s, errors='coerce')
+                        is_time_like = any(k in x_var.lower() for k in ["time", "date", "datetime", "ts"])
+                        x_num = convert_series(x_raw, is_time_like)
+                        y_num = convert_series(y_raw, any(k in y_var.lower() for k in ["time", "date", "datetime", "ts"]))
+                        z_num = pd.to_numeric(z_raw, errors='coerce')
+                        # Create mask for valid rows
+                        mask = (~x_num.isna()) & (~y_num.isna()) & (~z_num.isna())
+                        x_vals = x_num[mask]
+                        y_vals = y_num[mask]
+                        z_vals = z_num[mask]
+                        if len(x_vals) < 3:
+                            ax = self.adv_fig.add_subplot(111)
+                            ax.text(0.5, 0.5, "유효한 데이터가 충분하지 않습니다.", ha='center', va='center')
+                            ax.axis('off')
+                        else:
+                            # Create triangulation for irregular data
+                            tri = Triangulation(x_vals, y_vals)
+                            # Prepare 3 subplots
+                            self.adv_fig.clear()
+                            # Wireframe / surface 1
+                            ax1 = self.adv_fig.add_subplot(1, 3, 1, projection='3d')
+                            ax1.plot_trisurf(tri, z_vals, linewidth=0.2, edgecolor='black', antialiased=True)
+                            ax1.set_xlabel(x_var)
+                            ax1.set_ylabel(y_var)
+                            ax1.set_zlabel(z_var)
+                            ax1.set_title('Wireframe')
+                            # Contour-like surface 2 (colored)
+                            ax2 = self.adv_fig.add_subplot(1, 3, 2, projection='3d')
+                            # Use contour-like effect by drawing contour lines along z-axis with a colormap
+                            try:
+                                ax2.plot_trisurf(tri, z_vals, cmap='viridis', linewidth=0.0, antialiased=True)
+                            except Exception:
+                                ax2.scatter(x_vals, y_vals, z_vals, c=z_vals, cmap='viridis', s=5)
+                            ax2.set_xlabel(x_var)
+                            ax2.set_ylabel(y_var)
+                            ax2.set_zlabel(z_var)
+                            ax2.set_title('Surface')
+                            # Color-coded surface 3
+                            ax3 = self.adv_fig.add_subplot(1, 3, 3, projection='3d')
+                            try:
+                                ax3.plot_trisurf(tri, z_vals, cmap='plasma', linewidth=0.0, antialiased=True)
+                            except Exception:
+                                ax3.scatter(x_vals, y_vals, z_vals, c=z_vals, cmap='plasma', s=5)
+                            ax3.set_xlabel(x_var)
+                            ax3.set_ylabel(y_var)
+                            ax3.set_zlabel(z_var)
+                            ax3.set_title('Surface (Alt)')
             else:
+                # Fallback for unsupported visualization types
                 ax = self.adv_fig.add_subplot(111)
                 ax.text(0.5, 0.5, "해당 시각화는 지원되지 않습니다.", ha='center', va='center')
                 ax.axis('off')

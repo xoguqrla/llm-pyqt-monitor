@@ -51,11 +51,11 @@ from core.rag_ops import (
 from core.llm_ops import build_llm, build_sql_chain, generate_sql_from_nlq
 from core.plotting import df_to_table, plot_df_line
 from core.files_registry import upsert_entry, load_registry
-from core.analysis_visualizer import AnalysisVisualizer
+from core2.analysis_visualizer import AnalysisVisualizer
 
 # --- pdf_store: 모듈이 없으면 폴백 함수 정의 ---
 try:
-    from core.pdf_store import (
+    from core2.pdf_store import (
     ensure_pdf_tables, insert_pdf, insert_chunks,
     list_chunk_ids_by_doc, fetch_chunks_by_ids, delete_doc, keyword_search_chunks,
     list_all_docs,   # ← 추가
@@ -453,26 +453,14 @@ class MainWindow(QWidget):
 # app/main10_pdf_rag.py 파일에서 이 함수를 찾아 통째로 교체하세요.
 
     def setup_llm_tab(self):
-        """
-        Construct the UI for the LLM-based CSV analysis page.  This page consists of
-        three primary regions: a file management panel on the left, a chat/input
-        panel in the middle, and a results/visualization panel on the right.  A
-        QSplitter is used between the middle and right regions so the user can
-        interactively resize the chat area versus the results area.  The left
-        panel maintains a fixed width relative to the splitter contents.
-        """
-        # Main horizontal layout for the tab
         layout = QHBoxLayout(self.llm_tab)
-        # Create individual layouts for left, center, and right sections
-        left_layout = QVBoxLayout()
-        center_layout = QVBoxLayout()
-        right_layout = QVBoxLayout()
+        left, center, right = QVBoxLayout(), QVBoxLayout(), QVBoxLayout()
+        layout.addLayout(left, 2)
+        layout.addLayout(center, 6)
+        layout.addLayout(right, 4)
 
-        # ----------------------------------------------------------------------
-        # Left Panel: file management (CSV selection, upload, delete)
-        # ----------------------------------------------------------------------
-        # Top label
-        left_layout.addWidget(QLabel("📁 소스 파일 (RAG 및 SQL 대상)"))
+        # ============== 좌측: 파일 관리 (PDF 탭과 동일한 구조로 변경) ==============
+        left.addWidget(QLabel("📁 소스 파일 (RAG 및 SQL 대상)"))
 
         # (위) 새로 추가 섹션
         box_new = QFrame(); box_new.setFrameShape(QFrame.StyledPanel)
@@ -498,7 +486,7 @@ class MainWindow(QWidget):
         self.csv_new_list = QListWidget() # <-- 에러가 발생했던 'csv_new_list'가 여기서 생성됩니다.
         self.csv_new_list.setToolTip("이번 세션에서 추가한 CSV 파일 목록")
         ln.addWidget(self.csv_new_list, 1)
-        left_layout.addWidget(box_new)
+        left.addWidget(box_new)
 
         # (아래) 저장됨 섹션
         box_saved = QFrame(); box_saved.setFrameShape(QFrame.StyledPanel)
@@ -520,28 +508,24 @@ class MainWindow(QWidget):
         self.csv_saved_list = QListWidget() # <-- 저장된 파일 목록 위젯
         self.csv_saved_list.setToolTip("DB에 저장된 모든 CSV 파일")
         ls.addWidget(self.csv_saved_list, 1)
-        left_layout.addWidget(box_saved, 1)
+        left.addWidget(box_saved, 1)
 
-        # ----------------------------------------------------------------------
-        # Centre Panel: chat and prompt input
-        # ----------------------------------------------------------------------
-        center_layout.addWidget(QLabel("💬 LLM 질의"))
+        # ============== 중앙: 채팅 ==============
+        center.addWidget(QLabel("💬 LLM 질의"))
         tone_row = QHBoxLayout(); tone_row.addWidget(QLabel("톤"))
         self.tone = QComboBox(); self.tone.addItems(["전문", "친근"]); tone_row.addWidget(self.tone)
-        tone_row.addStretch(1); center_layout.addLayout(tone_row)
-        self.chat = ChatView(); center_layout.addWidget(self.chat, 1)
-        self.btn_clear_history = QPushButton("채팅 로그 초기화"); self.btn_clear_history.clicked.connect(self.on_clear_history); center_layout.addWidget(self.btn_clear_history)
+        tone_row.addStretch(1); center.addLayout(tone_row)
+        self.chat = ChatView(); center.addWidget(self.chat, 1)
+        self.btn_clear_history = QPushButton("채팅 로그 초기화"); self.btn_clear_history.clicked.connect(self.on_clear_history); center.addWidget(self.btn_clear_history)
         send_row = QHBoxLayout(); self.inp = QLineEdit(); self.inp.setPlaceholderText("질문을 입력하고 Enter…"); self.inp.returnPressed.connect(self.on_ask)
         self.btn_send = QPushButton("▶"); self.btn_send.clicked.connect(self.on_ask); self.status = QLabel("")
         send_row.addWidget(self.inp, 1); send_row.addWidget(self.btn_send); send_row.addWidget(self.status)
-        center_layout.addLayout(send_row)
+        center.addLayout(send_row)
 
-        # ----------------------------------------------------------------------
-        # Right Panel: results and visualizations
-        # ----------------------------------------------------------------------
-        right_layout.addWidget(QLabel("📊 LLM 결과/리포트"))
+        # ============== 우측: 결과 ==============
+        right.addWidget(QLabel("📊 LLM 결과/리포트"))
         # 결과/리포트 탭 영역
-        self.tabs = QTabWidget(); right_layout.addWidget(self.tabs, 1)
+        self.tabs = QTabWidget(); right.addWidget(self.tabs, 1)
         # (1) 표: SQL 결과를 보여주는 테이블
         self.tbl = QTableWidget()
         self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -549,12 +533,6 @@ class MainWindow(QWidget):
         # (2) 기본 차트: SQL 결과를 간단한 라인 차트로 표시
         self.fig, self.ax = plt.subplots()
         self.canvas = FigureCanvas(self.fig)
-        # Allow the chart canvas to expand within its container for better resizing
-        try:
-            from PyQt5.QtWidgets import QSizePolicy
-            self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        except Exception:
-            pass
         self.tabs.addTab(self.canvas, "그래프(Chart)")
         # (3) Evidence: SQL 및 RAG 근거, 프리뷰 출력
         self.evidence = QTextEdit()
@@ -576,12 +554,6 @@ class MainWindow(QWidget):
         # (5) 고급 시각화: 2페이지의 분석 결과를 1페이지에서도 볼 수 있도록 하는 탭
         self.adv_fig = plt.figure()
         self.adv_canvas = FigureCanvas(self.adv_fig)
-        # Allow the advanced visualization canvas to expand for better resizing
-        try:
-            from PyQt5.QtWidgets import QSizePolicy
-            self.adv_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        except Exception:
-            pass
         self.adv_tab_index = self.tabs.addTab(self.adv_canvas, "시각화 결과")
 
         # (6) 전문가 코멘트: 도메인 지식 메모장 탭
@@ -617,24 +589,6 @@ class MainWindow(QWidget):
             self.csv_saved_list.itemDoubleClicked.connect(self.on_load_saved_csv)
         except Exception:
             pass
-
-        # ----------------------------------------------------------------------
-        # Combine centre and right layouts into widgets and wrap in a splitter
-        # ----------------------------------------------------------------------
-        center_widget = QWidget(); center_widget.setLayout(center_layout)
-        right_widget = QWidget(); right_widget.setLayout(right_layout)
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(center_widget)
-        splitter.addWidget(right_widget)
-        # Set stretch factors so the centre and right panels share space proportionally
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        # Add left panel and splitter to the main layout
-        left_widget = QWidget(); left_widget.setLayout(left_layout)
-        # Ensure left panel doesn't collapse; give it a minimum width
-        left_widget.setMinimumWidth(260)
-        layout.addWidget(left_widget)
-        layout.addWidget(splitter, 1)
 
     def setup_viz_tab(self):
         layout = QVBoxLayout(self.viz_tab)
@@ -2122,21 +2076,6 @@ class MainWindow(QWidget):
         # Collect from new and saved lists
         collect_names(getattr(self, 'csv_new_list', None))
         collect_names(getattr(self, 'csv_saved_list', None))
-        # If no names found via checked/selected items, fall back to the current item in each list
-        if not names:
-            for lst in (getattr(self, 'csv_new_list', None), getattr(self, 'csv_saved_list', None)):
-                try:
-                    current = lst.currentItem() if lst else None
-                except Exception:
-                    current = None
-                if current:
-                    try:
-                        fname = current.data(Qt.UserRole) or current.text().split(' ')[0]
-                    except Exception:
-                        fname = None
-                    if fname:
-                        names.append(fname)
-                        break
         return names
 
     def ensure_dataset_loaded(self) -> bool:
@@ -2148,24 +2087,6 @@ class MainWindow(QWidget):
         # If we already have a dataset loaded and a visualizer, nothing to do
         if getattr(self, "current_df", None) is not None and getattr(self, "visualizer", None) is not None:
             return True
-        # If there is no loaded dataset but there is a previously rendered DataFrame (last_df),
-        # use it as the current dataset.  This allows advanced visualizations to operate on
-        # the most recent LLM query results even if the user has not explicitly selected a file.
-        try:
-            if getattr(self, "last_df", None) is not None and isinstance(self.last_df, pd.DataFrame) and not self.last_df.empty:
-                # Set current_df and df_viz to the last result
-                self.current_df = self.last_df
-                self.df_viz = self.last_df
-                try:
-                    self.visualizer = AnalysisVisualizer(self.last_df)
-                except Exception:
-                    self.visualizer = None
-                # Record a placeholder name for prompts
-                if not getattr(self, "selected_dataset_name", None):
-                    self.selected_dataset_name = "recent_query"
-                return True
-        except Exception:
-            pass
         # Try to load from selected filenames (checkboxes)
         try:
             selected_names = self.get_selected_filenames()
@@ -2278,57 +2199,31 @@ class MainWindow(QWidget):
             if kw in lower:
                 is_3d = True
                 break
-        # Tokenize the query into potential variable names (alphanumerics, Hangul, and underscores)
+        # Tokenize the query into potential variable names (alphanumerics and underscores)
         import re
-        tokens = re.findall(r"[a-zA-Z0-9가-힣_]+", query)
+        tokens = re.findall(r"[a-zA-Z0-9_]+", query)
         # Build mapping of lower-case standardized column names to original
         if getattr(self, "current_df", None) is None:
             return None
         col_map = {c.lower(): c for c in self.current_df.columns}
-        # Define simple synonym mapping for commonly used Korean terms
-        # to their corresponding column names (in lower-case) when present.
-        synonyms = {
-            "시간": "time",  # time column
-            "타임": "time",
-            "시각": "time",
-            "타임스탬프": "time",
-            "mpt": "mpt",  # melt pool temperature (if written in lower-case)
-            "mpa": "mpa",
-            "mpw": "mpw",
-        }
         variables: List[str] = []
         # Helper to add variable if it matches a column
         def try_add_var(tok: str):
-            """
-            Attempt to map a token to an existing DataFrame column.  The search
-            considers exact matches, normalized matches (underscores removed),
-            substring matches, and user-defined synonyms for Korean terms.  The
-            result is appended to the variables list if found.
-            """
-            raw = tok.strip()
-            if not raw:
+            t = tok.lower().strip()
+            if not t:
                 return
-            # Check for synonym mapping (case-sensitive for Korean terms)
-            if raw in synonyms:
-                mapped = synonyms[raw]
-                # Use lower-case version of the mapped column name to find in col_map
-                lc = mapped.lower()
-                if lc in col_map:
-                    variables.append(col_map[lc])
-                    return
-            t = raw.lower()
             # Try exact match
             if t in col_map:
                 variables.append(col_map[t])
                 return
-            # Try removing underscores or hyphens for both token and columns
+            # Try removing underscores or hyphens
             t_mod = t.replace("_", "").replace("-", "")
             for key in col_map:
-                key_mod = key.replace("_", "").replace("-", "")
+                key_mod = key.replace("_", "")
                 if key_mod == t_mod:
                     variables.append(col_map[key])
                     return
-            # As a last resort, check if token is a substring of any column name
+            # As last resort, check if token is substring of column
             for key in col_map:
                 if t in key:
                     variables.append(col_map[key])
@@ -2794,9 +2689,9 @@ class MainWindow(QWidget):
                         else:
                             ax = self.adv_fig.add_subplot(111)
                             ax.plot(elapsed, mpt_series.reset_index(drop=True), marker='o')
-                            ax.set_xlabel("Elapsed time (s)")
+                            ax.set_xlabel("경과 시간 (초)")
                             ax.set_ylabel("MPT")
-                            ax.set_title("MPT vs Time")
+                            ax.set_title("시간 대비 MPT 변화")
                             ax.grid(True)
             elif viz_type == 'custom_time':
                 # Multi-series line chart versus time for user-selected variables
@@ -2869,14 +2764,14 @@ class MainWindow(QWidget):
                                 ax.text(0.5, 0.5, "유효한 y 변수가 없어 그래프를 그릴 수 없습니다.", ha='center', va='center')
                                 ax.axis('off')
                             else:
-                                ax.set_xlabel("Elapsed time (s)")
-                                # Y-axis label omitted to avoid font issues; individual lines have legends
-                                title = " vs Time: " + ", ".join(y_vars)
+                                ax.set_xlabel("경과 시간 (초)")
+                                ax.set_ylabel("값")
+                                title = "시간 대비 " + ", ".join(y_vars) + " 변화"
                                 ax.set_title(title)
                                 ax.legend()
                                 ax.grid(True)
             elif viz_type == 'custom_3d':
-                # 3D surface and contour visualizations using three variables (x, y, z)
+                # 3D scatter plot using three variables for x, y, z
                 if not variables or len(variables) < 3:
                     ax = self.adv_fig.add_subplot(111)
                     ax.text(0.5, 0.5, "3개 이상의 변수가 필요합니다.", ha='center', va='center')
@@ -2884,7 +2779,6 @@ class MainWindow(QWidget):
                 else:
                     x_var, y_var, z_var = variables[:3]
                     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (for 3D projection)
-                    from matplotlib.tri import Triangulation
                     try:
                         x_raw = self.current_df[x_var]
                         y_raw = self.current_df[y_var]
@@ -2896,73 +2790,45 @@ class MainWindow(QWidget):
                         ax.text(0.5, 0.5, "지정한 변수를 찾을 수 없습니다.", ha='center', va='center')
                         ax.axis('off')
                     else:
-                        # Convert variables to numeric values; treat x as time-like if needed
+                        # Parse or convert variables to numeric values
                         def convert_series(s, is_time=False):
-                            # Helper to convert series to numeric; if time-like, convert datetime to elapsed seconds
                             if is_time:
+                                # Convert datetime to elapsed seconds or numeric
                                 if pd.api.types.is_datetime64_any_dtype(s):
                                     try:
                                         return (s - s.iloc[0]).dt.total_seconds()
                                     except Exception:
                                         return pd.to_numeric(s, errors='coerce')
-                                # Try parsing time strings
-                                parsed = s.apply(lambda x: pd.to_datetime(x) if isinstance(x, str) else pd.NaT)
-                                if parsed.notna().mean() > 0.5:
-                                    try:
-                                        return (parsed - parsed.iloc[0]).dt.total_seconds()
-                                    except Exception:
-                                        return pd.to_numeric(s, errors='coerce')
-                                return pd.to_numeric(s, errors='coerce')
+                                else:
+                                    # Attempt to parse string time patterns
+                                    parsed = s.apply(lambda x: pd.to_datetime(x) if isinstance(x, str) else pd.NaT)
+                                    if parsed.notna().mean() > 0.5:
+                                        try:
+                                            return (parsed - parsed.iloc[0]).dt.total_seconds()
+                                        except Exception:
+                                            return pd.to_numeric(s, errors='coerce')
+                                    return pd.to_numeric(s, errors='coerce')
                             else:
                                 return pd.to_numeric(s, errors='coerce')
+                        # Determine if x variable looks like time
                         is_time_like = any(k in x_var.lower() for k in ["time", "date", "datetime", "ts"])
                         x_num = convert_series(x_raw, is_time_like)
-                        y_num = convert_series(y_raw, any(k in y_var.lower() for k in ["time", "date", "datetime", "ts"]))
+                        y_num = pd.to_numeric(y_raw, errors='coerce')
                         z_num = pd.to_numeric(z_raw, errors='coerce')
-                        # Create mask for valid rows
+                        # Drop rows with NaN in any variable
                         mask = (~x_num.isna()) & (~y_num.isna()) & (~z_num.isna())
-                        x_vals = x_num[mask]
-                        y_vals = y_num[mask]
-                        z_vals = z_num[mask]
-                        if len(x_vals) < 3:
+                        if mask.sum() < 3:
                             ax = self.adv_fig.add_subplot(111)
                             ax.text(0.5, 0.5, "유효한 데이터가 충분하지 않습니다.", ha='center', va='center')
                             ax.axis('off')
                         else:
-                            # Create triangulation for irregular data
-                            tri = Triangulation(x_vals, y_vals)
-                            # Prepare 3 subplots
-                            self.adv_fig.clear()
-                            # Wireframe / surface 1
-                            ax1 = self.adv_fig.add_subplot(1, 3, 1, projection='3d')
-                            ax1.plot_trisurf(tri, z_vals, linewidth=0.2, edgecolor='black', antialiased=True)
-                            ax1.set_xlabel(x_var)
-                            ax1.set_ylabel(y_var)
-                            ax1.set_zlabel(z_var)
-                            ax1.set_title('Wireframe')
-                            # Contour-like surface 2 (colored)
-                            ax2 = self.adv_fig.add_subplot(1, 3, 2, projection='3d')
-                            # Use contour-like effect by drawing contour lines along z-axis with a colormap
-                            try:
-                                ax2.plot_trisurf(tri, z_vals, cmap='viridis', linewidth=0.0, antialiased=True)
-                            except Exception:
-                                ax2.scatter(x_vals, y_vals, z_vals, c=z_vals, cmap='viridis', s=5)
-                            ax2.set_xlabel(x_var)
-                            ax2.set_ylabel(y_var)
-                            ax2.set_zlabel(z_var)
-                            ax2.set_title('Surface')
-                            # Color-coded surface 3
-                            ax3 = self.adv_fig.add_subplot(1, 3, 3, projection='3d')
-                            try:
-                                ax3.plot_trisurf(tri, z_vals, cmap='plasma', linewidth=0.0, antialiased=True)
-                            except Exception:
-                                ax3.scatter(x_vals, y_vals, z_vals, c=z_vals, cmap='plasma', s=5)
-                            ax3.set_xlabel(x_var)
-                            ax3.set_ylabel(y_var)
-                            ax3.set_zlabel(z_var)
-                            ax3.set_title('Surface (Alt)')
+                            ax3d = self.adv_fig.add_subplot(111, projection='3d')
+                            ax3d.scatter(x_num[mask], y_num[mask], z_num[mask], c='b', marker='o')
+                            ax3d.set_xlabel(x_var)
+                            ax3d.set_ylabel(y_var)
+                            ax3d.set_zlabel(z_var)
+                            ax3d.set_title(f"3D 시각화: {x_var}, {y_var}, {z_var}")
             else:
-                # Fallback for unsupported visualization types
                 ax = self.adv_fig.add_subplot(111)
                 ax.text(0.5, 0.5, "해당 시각화는 지원되지 않습니다.", ha='center', va='center')
                 ax.axis('off')

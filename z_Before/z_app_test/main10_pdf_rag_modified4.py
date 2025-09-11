@@ -51,11 +51,11 @@ from core.rag_ops import (
 from core.llm_ops import build_llm, build_sql_chain, generate_sql_from_nlq
 from core.plotting import df_to_table, plot_df_line
 from core.files_registry import upsert_entry, load_registry
-from core.analysis_visualizer import AnalysisVisualizer
+from core2.analysis_visualizer import AnalysisVisualizer
 
 # --- pdf_store: 모듈이 없으면 폴백 함수 정의 ---
 try:
-    from core.pdf_store import (
+    from core2.pdf_store import (
     ensure_pdf_tables, insert_pdf, insert_chunks,
     list_chunk_ids_by_doc, fetch_chunks_by_ids, delete_doc, keyword_search_chunks,
     list_all_docs,   # ← 추가
@@ -847,31 +847,29 @@ class MainWindow(QWidget):
         # 전문가 코멘트 테이블 보장
         try:
             with self.engine.begin() as c:
-                # Adjust primary key syntax based on the database dialect
                 dialect = getattr(self.engine, "dialect", None)
                 if dialect and getattr(dialect, "name", "").lower() == "postgresql":
-                    # Use SERIAL for PostgreSQL
-                    ddl = (
-                        "\n"
-                        "CREATE TABLE IF NOT EXISTS expert_comments (\n"
-                        "    id SERIAL PRIMARY KEY,\n"
-                        "    content TEXT NOT NULL,\n"
-                        "    created_at TEXT\n"
-                        ")\n"
-                    )
+                    # PostgreSQL용: SERIAL 사용
+                    ddl = """
+        CREATE TABLE IF NOT EXISTS expert_comments (
+            id SERIAL PRIMARY KEY,
+            content TEXT NOT NULL,
+            created_at TEXT
+        )
+        """
                 else:
-                    # Use AUTOINCREMENT for SQLite and others that support it
-                    ddl = (
-                        "\n"
-                        "CREATE TABLE IF NOT EXISTS expert_comments (\n"
-                        "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-                        "    content TEXT NOT NULL,\n"
-                        "    created_at TEXT\n"
-                        ")\n"
-                    )
+                    # SQLite 등 AUTOINCREMENT를 지원하는 DB용
+                    ddl = """
+        CREATE TABLE IF NOT EXISTS expert_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL,
+            created_at TEXT
+        )
+        """
                 c.exec_driver_sql(ddl)
         except Exception as e:
             print(f"[expert_comments table init error] {e}")
+
 
     # LLM 보조
     def build_prompt(self, question: str) -> str:
@@ -1250,13 +1248,6 @@ class MainWindow(QWidget):
                 self.deep_report_inputs.append(q)
                 self.chat.add_bot("계속 입력해주세요. 보고서를 완료하려면 '끝' 또는 '완료'라고 입력하세요.")
             return
-        # Attempt to load a dataset from selected files if none is loaded.
-        # This allows analysis and visualization on datasets selected in the saved list
-        # without requiring an explicit upload or double-click.
-        try:
-            self.ensure_dataset_loaded()
-        except Exception:
-            pass
         # Normal LLM processing
         tone = self.tone.currentText()
         self.set_busy(True)
@@ -1328,22 +1319,13 @@ class MainWindow(QWidget):
                     pass
             # Always display evidence text
             self.evidence.setPlainText(evidence_text)
-            # Determine visualization trigger keywords and parse custom visual requests
+            # Determine visualization trigger keywords
             try:
                 query_lower = q.lower()
             except Exception:
                 query_lower = q
             # Trigger appropriate visualization on the LLM page
-            # First, try to parse a custom variable request for multi-series or 3D plots
-            vis_request = None
-            try:
-                vis_request = self.parse_visual_request(q)
-            except Exception:
-                vis_request = None
-            if vis_request:
-                vtype, vars_list = vis_request
-                self.show_visualization(vtype, vars_list)
-            elif any(k in query_lower for k in ["상관관계", "correlation"]):
+            if any(k in query_lower for k in ["상관관계", "correlation"]):
                 # Show correlation dashboard in advanced tab
                 self.show_visualization('correlation')
             elif any(k in query_lower for k in ["3d", "경로", "path"]):
@@ -1927,13 +1909,6 @@ class MainWindow(QWidget):
             self.inp.setText("이 분석 결과가 의미하는 바를 해석하고, 공정 개선을 위한 제안 3가지를 해줘.")
             self.inp.setFocus()
 
-        # Ensure dataset is loaded from selection if not already
-        # (used when the user directly asks to analyze or interpret current visualization)
-        try:
-            self.ensure_dataset_loaded()
-        except Exception:
-            pass
-
     # ------------------------------------------------------------------
     # 전문가 코멘트 관리 메서드들
     def load_expert_comments(self):
@@ -2040,111 +2015,25 @@ class MainWindow(QWidget):
     # ------------------------------------------------------------------
     # 선택된 CSV 파일 명단을 반환
     def get_selected_filenames(self) -> List[str]:
-        """
-        Return a list of filenames selected by the user. An item is considered selected if its checkbox
-        is ticked or if the row is highlighted (selected) in the list. This makes it more convenient
-        for the user to simply click a row without checking the box to select a dataset.
-        """
+        """Return the list of filenames that are checked in the CSV lists."""
         names: List[str] = []
-        # Helper to extract names from a given QListWidget
-        def collect_names(lst: QListWidget | None):
-            if not lst:
-                return
-            for i in range(lst.count()):
-                it = lst.item(i)
-                if not it:
-                    continue
-                # Determine if the item is checked
-                try:
-                    checked = (it.checkState() == Qt.Checked)
-                except Exception:
-                    checked = False
-                # Determine if the item is selected (highlighted)
-                selected = False
-                try:
-                    selected = it.isSelected()
-                except Exception:
-                    selected = False
-                # If either checked or selected, include this filename
-                if checked or selected:
-                    try:
-                        fname = it.data(Qt.UserRole) or it.text().split(' ')[0]
-                    except Exception:
-                        fname = None
-                    if fname:
-                        names.append(fname)
-        # Collect from new and saved lists
-        collect_names(getattr(self, 'csv_new_list', None))
-        collect_names(getattr(self, 'csv_saved_list', None))
-        return names
-
-    def ensure_dataset_loaded(self) -> bool:
-        """
-        Ensure that a dataset is loaded into current_df and visualizer. If none are loaded yet,
-        attempt to load the first selected dataset from the registry or database. Returns
-        True if a dataset is loaded after this call, False otherwise.
-        """
-        # If we already have a dataset loaded and a visualizer, nothing to do
-        if getattr(self, "current_df", None) is not None and getattr(self, "visualizer", None) is not None:
-            return True
-        # Try to load from selected filenames (checkboxes)
-        try:
-            selected_names = self.get_selected_filenames()
-        except Exception:
-            selected_names = []
-        # No selected data, cannot load
-        if not selected_names:
-            return False
-        # Loop through selected names and load the first valid dataset
-        for fname in selected_names:
-            path_str = None
-            # Determine file path from registry via file_id
+        # Newly added files
+        for i in range(self.csv_new_list.count() if hasattr(self, 'csv_new_list') else 0):
+            it = self.csv_new_list.item(i)
             try:
-                file_id = self.file_ids.get(fname)
+                if it and it.checkState() == Qt.Checked:
+                    names.append(it.data(Qt.UserRole) or it.text().split(' ')[0])
             except Exception:
-                file_id = None
-            if file_id:
-                try:
-                    entries = load_registry()
-                    entry = entries.get(file_id)
-                    if entry and entry.get("path"):
-                        path_str = entry["path"]
-                except Exception:
-                    pass
-            df_loaded = None
-            # Try to load from file
-            if path_str and os.path.exists(path_str):
-                try:
-                    # Use load_and_meta for consistency (standardize columns)
-                    df_loaded, meta, _ = load_and_meta(Path(path_str), self.s.meta_json_dir)
-                except Exception:
-                    try:
-                        df_loaded = pd.read_csv(path_str)
-                    except Exception:
-                        df_loaded = None
-            # Fallback: load from SQL table
-            if df_loaded is None:
-                table = table_name_from_file(fname)
-                try:
-                    df_loaded = run_sql(self.engine, f'SELECT * FROM "{table}"')
-                except Exception:
-                    df_loaded = None
-            if isinstance(df_loaded, pd.DataFrame) and not df_loaded.empty:
-                # Set current_df, df_viz and visualizer
-                try:
-                    self.current_df = df_loaded
-                    self.df_viz = df_loaded
-                    try:
-                        self.visualizer = AnalysisVisualizer(df_loaded)
-                    except Exception:
-                        self.visualizer = None
-                    # Also update selected_dataset_name for prompts
-                    self.selected_dataset_name = fname
-                except Exception:
-                    pass
-                break
-        # Return True if loaded
-        return getattr(self, "current_df", None) is not None and getattr(self, "visualizer", None) is not None
+                continue
+        # Saved files
+        for i in range(self.csv_saved_list.count() if hasattr(self, 'csv_saved_list') else 0):
+            it = self.csv_saved_list.item(i)
+            try:
+                if it and it.checkState() == Qt.Checked:
+                    names.append(it.data(Qt.UserRole) or it.text().split(' ')[0])
+            except Exception:
+                continue
+        return names
 
     def get_selected_files_summary(self) -> str:
         """
@@ -2173,82 +2062,6 @@ class MainWindow(QWidget):
             else:
                 summary_lines.append(f"- {fname}: (요약 정보 없음)")
         return "\n".join(summary_lines)
-
-    # ------------------------------------------------------------------
-    # Parse user query for custom visualization requests
-    def parse_visual_request(self, query: str) -> Tuple[str, List[str]] | None:
-        """
-        Analyze the user's query and determine if it requests a custom visualization using
-        multiple variables. Returns a tuple (viz_type, variables) where viz_type is one of:
-
-          - 'custom_3d': for 3D scatter/line plots with three variables (x, y, z)
-          - 'custom_time': for multi-series line charts vs. time (first variable should be time)
-
-        If the query does not match a custom visual request, returns None.
-
-        Example queries:
-            '시간, MPT, r_LP 3차원 시각화' -> ('custom_3d', ['time', 'mpt', 'r_lp'])
-            '전체 시간에 대해 MPT, R_RS 그래프를 그려줘' -> ('custom_time', ['time','mpt','r_rs'])
-        """
-        if not isinstance(query, str) or not query.strip():
-            return None
-        lower = query.lower()
-        # Determine if the user requested a 3D visualization
-        is_3d = False
-        for kw in ["3d", "3차원", "3d", "three-dimensional", "3차원 시각화", "3d plot", "3d 시각화"]:
-            if kw in lower:
-                is_3d = True
-                break
-        # Tokenize the query into potential variable names (alphanumerics and underscores)
-        import re
-        tokens = re.findall(r"[a-zA-Z0-9_]+", query)
-        # Build mapping of lower-case standardized column names to original
-        if getattr(self, "current_df", None) is None:
-            return None
-        col_map = {c.lower(): c for c in self.current_df.columns}
-        variables: List[str] = []
-        # Helper to add variable if it matches a column
-        def try_add_var(tok: str):
-            t = tok.lower().strip()
-            if not t:
-                return
-            # Try exact match
-            if t in col_map:
-                variables.append(col_map[t])
-                return
-            # Try removing underscores or hyphens
-            t_mod = t.replace("_", "").replace("-", "")
-            for key in col_map:
-                key_mod = key.replace("_", "")
-                if key_mod == t_mod:
-                    variables.append(col_map[key])
-                    return
-            # As last resort, check if token is substring of column
-            for key in col_map:
-                if t in key:
-                    variables.append(col_map[key])
-                    return
-        # Extract potential variable names from tokens
-        for tok in tokens:
-            try_add_var(tok)
-        # Remove duplicates while preserving order
-        seen = set()
-        variables = [x for x in variables if not (x.lower() in seen or seen.add(x.lower()))]
-        # Determine type based on presence of variables and 3D flag
-        if is_3d and len(variables) >= 3:
-            # Use the first three variables
-            return ("custom_3d", variables[:3])
-        # For multi-series line vs time: require at least one time-like and one other variable
-        # Identify time-like columns among variables
-        time_like = [v for v in variables if any(k in v.lower() for k in ["time", "date", "datetime", "ts"])]
-        if time_like and len(variables) >= 2:
-            # Ensure the time variable is first in the list
-            time_col = time_like[0]
-            # Put time_col first and the rest afterwards (preserve order)
-            ordered = [time_col] + [v for v in variables if v != time_col]
-            return ("custom_time", ordered)
-        # No custom visualization pattern detected
-        return None
 
     # ------------------------------------------------------------------
     # 새로운 기능: 저장된 CSV 더블클릭으로 로딩
@@ -2553,10 +2366,10 @@ class MainWindow(QWidget):
             self.tabs.setCurrentIndex(idx)
 
     # 고급 시각화 처리
-    def show_visualization(self, viz_type: str, variables: List[str] | None = None):
+    def show_visualization(self, viz_type: str):
         """
         Generate and display advanced visualizations in the LLM results area based on the
-        provided viz_type and optional variables list. Uses self.visualizer and self.current_df.
+        provided viz_type. Uses self.visualizer and self.current_df.
 
         Supported viz_type values:
           - 'correlation': 상관관계 대시보드
@@ -2564,18 +2377,10 @@ class MainWindow(QWidget):
           - 'simulation': 공정 시뮬레이션 (메시지로 안내)
           - 'aw': A*W 적층 부피 (메시지로 안내)
           - 'mpt_time': 시간 대비 MPT 변화 그래프
-          - 'custom_time': multi-series line chart with a time column and multiple numeric y variables (variables param)
-          - 'custom_3d': 3D scatter plot using three variables for x, y, z axes (variables param)
           - other: 메시지로 안내
         """
-        # Ensure there is a dataset to visualize. If none loaded, attempt to load from selected data.
-        try:
-            if not self.ensure_dataset_loaded():
-                # Still no dataset; notify the user
-                QMessageBox.information(self, "시각화", "먼저 CSV 파일을 선택하거나 업로드하여 분석을 진행하세요.")
-                return
-        except Exception:
-            # On error, fallback to user message
+        # Ensure there is a dataset to visualize
+        if self.visualizer is None or self.current_df is None:
             QMessageBox.information(self, "시각화", "먼저 CSV 파일을 선택하거나 업로드하여 분석을 진행하세요.")
             return
         # Clear existing figure
@@ -2602,45 +2407,13 @@ class MainWindow(QWidget):
                 ax.axis('off')
             elif viz_type == 'mpt_time':
                 # Draw MPT vs Time line chart using relative time in seconds
-                # Find columns for time and MPT using flexible substring matching
-                # Build a lowercase mapping for quick lookup
-                cols_lower = {c.lower(): c for c in self.current_df.columns}
-                # Determine a time-like column: exact match or containing keywords
-                time_col = None
-                # First try common names
-                for cand in ["time", "timestamp", "date", "datetime", "ts"]:
-                    if cand in cols_lower:
-                        time_col = cols_lower[cand]
-                        break
-                # If not found, search for any column containing 'time' or 'date'
-                if time_col is None:
-                    for c in self.current_df.columns:
-                        cl = c.lower()
-                        if 'time' in cl or 'date' in cl or 'ts' in cl:
-                            time_col = c
-                            break
-                # Determine MPT-like column: exact or containing 'mpt'
-                mpt_col = None
-                # Try common names
-                for cand in ["mpt", "mp_t", "mp.t", "m.p.t", "mpttemp"]:
-                    if cand in cols_lower:
-                        mpt_col = cols_lower.get(cand)
-                        if mpt_col:
-                            break
-                # Search for any column containing 'mpt'
-                if mpt_col is None:
-                    for c in self.current_df.columns:
-                        if 'mpt' in c.lower():
-                            mpt_col = c
-                            break
-                if not time_col or not mpt_col:
+                if "time" not in self.current_df.columns or "MPT" not in self.current_df.columns:
                     ax = self.adv_fig.add_subplot(111)
-                    ax.text(0.5, 0.5, "'time' 또는 'MPT' 관련 컬럼을 찾을 수 없어 그래프를 그릴 수 없습니다.", ha='center', va='center')
+                    ax.text(0.5, 0.5, "'time' 또는 'MPT' 컬럼이 없어 그래프를 그릴 수 없습니다.", ha='center', va='center')
                     ax.axis('off')
                 else:
-                    # Parse time column with custom logic: treat last 3 digits as ms for strings of pattern
+                    # Parse time column with custom logic: treat last 3 digits as ms
                     def parse_custom_time(s: str):
-                        # Handles strings like MM_DD_HH_MM_SS_MMM (ms)
                         if isinstance(s, str):
                             parts = s.split('_')
                             if len(parts) == 6 and len(parts[-1]) == 3 and parts[-1].isdigit():
@@ -2653,181 +2426,25 @@ class MainWindow(QWidget):
                             return pd.to_datetime(s)
                         except Exception:
                             return pd.NaT
-                    t_series_raw = self.current_df[time_col]
-                    # Use existing datetime if dtype is datetime, otherwise parse
-                    if pd.api.types.is_datetime64_any_dtype(t_series_raw):
-                        t_series = t_series_raw
-                    else:
-                        # Parse each element
-                        t_series = t_series_raw.apply(parse_custom_time)
-                    # Validate times and MPT values
+                    t_series = self.current_df["time"].apply(parse_custom_time)
+                    # Drop invalid times
                     valid_mask = t_series.notna()
-                    mpt_series = pd.to_numeric(self.current_df.loc[valid_mask, mpt_col], errors="coerce")
                     t_series = t_series[valid_mask]
-                    mpt_series = mpt_series[~mpt_series.isna()]
-                    # Align time and mpt lengths (drop NaN mpt values)
-                    if len(mpt_series) != len(t_series):
-                        # Align index
-                        common_index = t_series.index.intersection(mpt_series.index)
-                        t_series = t_series.loc[common_index]
-                        mpt_series = mpt_series.loc[common_index]
-                    # Need at least two points
+                    mpt_series = pd.to_numeric(self.current_df.loc[valid_mask, "MPT"], errors="coerce")
+                    # If less than 2 valid points, show message
                     if len(t_series) < 2:
                         ax = self.adv_fig.add_subplot(111)
                         ax.text(0.5, 0.5, "유효한 시간 데이터가 충분하지 않습니다.", ha='center', va='center')
                         ax.axis('off')
                     else:
                         # Compute elapsed seconds relative to start
-                        try:
-                            elapsed = (t_series - t_series.iloc[0]).dt.total_seconds()
-                        except Exception:
-                            elapsed = None
-                        if elapsed is None:
-                            ax = self.adv_fig.add_subplot(111)
-                            ax.text(0.5, 0.5, "시간 데이터를 해석할 수 없습니다.", ha='center', va='center')
-                            ax.axis('off')
-                        else:
-                            ax = self.adv_fig.add_subplot(111)
-                            ax.plot(elapsed, mpt_series.reset_index(drop=True), marker='o')
-                            ax.set_xlabel("경과 시간 (초)")
-                            ax.set_ylabel("MPT")
-                            ax.set_title("시간 대비 MPT 변화")
-                            ax.grid(True)
-            elif viz_type == 'custom_time':
-                # Multi-series line chart versus time for user-selected variables
-                # variables[0] should be time, rest are y variables
-                if not variables or len(variables) < 2:
-                    ax = self.adv_fig.add_subplot(111)
-                    ax.text(0.5, 0.5, "적절한 변수 목록이 없어 시각화할 수 없습니다.", ha='center', va='center')
-                    ax.axis('off')
-                else:
-                    time_col = variables[0]
-                    y_vars = variables[1:]
-                    # Build time series using parse_custom_time similar to MPT
-                    def parse_custom_time(s: str):
-                        if isinstance(s, str):
-                            parts = s.split('_')
-                            if len(parts) == 6 and len(parts[-1]) == 3 and parts[-1].isdigit():
-                                s_mod = '_'.join(parts[:-1] + [parts[-1] + '000'])
-                                try:
-                                    return pd.to_datetime(s_mod, format="%m_%d_%H_%M_%S_%f")
-                                except Exception:
-                                    pass
-                        try:
-                            return pd.to_datetime(s)
-                        except Exception:
-                            return pd.NaT
-                    try:
-                        t_series_raw = self.current_df[time_col]
-                    except Exception:
-                        t_series_raw = None
-                    if t_series_raw is None:
+                        elapsed = (t_series - t_series.iloc[0]).dt.total_seconds()
                         ax = self.adv_fig.add_subplot(111)
-                        ax.text(0.5, 0.5, "시간 변수를 찾을 수 없어 시각화할 수 없습니다.", ha='center', va='center')
-                        ax.axis('off')
-                    else:
-                        if pd.api.types.is_datetime64_any_dtype(t_series_raw):
-                            t_series = t_series_raw
-                        else:
-                            t_series = t_series_raw.apply(parse_custom_time)
-                        # Use relative seconds if datetime, else numeric directly
-                        elapsed = None
-                        if pd.api.types.is_datetime64_any_dtype(t_series):
-                            try:
-                                elapsed = (t_series - t_series.iloc[0]).dt.total_seconds()
-                            except Exception:
-                                elapsed = None
-                        if elapsed is None:
-                            try:
-                                elapsed = pd.to_numeric(t_series, errors='coerce')
-                            except Exception:
-                                elapsed = None
-                        if elapsed is None or elapsed.dropna().size < 2:
-                            ax = self.adv_fig.add_subplot(111)
-                            ax.text(0.5, 0.5, "시간 변수를 해석할 수 없거나 데이터가 부족합니다.", ha='center', va='center')
-                            ax.axis('off')
-                        else:
-                            ax = self.adv_fig.add_subplot(111)
-                            for var in y_vars:
-                                try:
-                                    y = pd.to_numeric(self.current_df[var], errors='coerce')
-                                except Exception:
-                                    y = None
-                                if y is None:
-                                    continue
-                                # Align length
-                                common_index = elapsed.dropna().index.intersection(y.dropna().index)
-                                if len(common_index) < 2:
-                                    continue
-                                ax.plot(elapsed.loc[common_index], y.loc[common_index], marker='o', label=var)
-                            if not ax.lines:
-                                ax.text(0.5, 0.5, "유효한 y 변수가 없어 그래프를 그릴 수 없습니다.", ha='center', va='center')
-                                ax.axis('off')
-                            else:
-                                ax.set_xlabel("경과 시간 (초)")
-                                ax.set_ylabel("값")
-                                title = "시간 대비 " + ", ".join(y_vars) + " 변화"
-                                ax.set_title(title)
-                                ax.legend()
-                                ax.grid(True)
-            elif viz_type == 'custom_3d':
-                # 3D scatter plot using three variables for x, y, z
-                if not variables or len(variables) < 3:
-                    ax = self.adv_fig.add_subplot(111)
-                    ax.text(0.5, 0.5, "3개 이상의 변수가 필요합니다.", ha='center', va='center')
-                    ax.axis('off')
-                else:
-                    x_var, y_var, z_var = variables[:3]
-                    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (for 3D projection)
-                    try:
-                        x_raw = self.current_df[x_var]
-                        y_raw = self.current_df[y_var]
-                        z_raw = self.current_df[z_var]
-                    except Exception:
-                        x_raw = y_raw = z_raw = None
-                    if x_raw is None or y_raw is None or z_raw is None:
-                        ax = self.adv_fig.add_subplot(111)
-                        ax.text(0.5, 0.5, "지정한 변수를 찾을 수 없습니다.", ha='center', va='center')
-                        ax.axis('off')
-                    else:
-                        # Parse or convert variables to numeric values
-                        def convert_series(s, is_time=False):
-                            if is_time:
-                                # Convert datetime to elapsed seconds or numeric
-                                if pd.api.types.is_datetime64_any_dtype(s):
-                                    try:
-                                        return (s - s.iloc[0]).dt.total_seconds()
-                                    except Exception:
-                                        return pd.to_numeric(s, errors='coerce')
-                                else:
-                                    # Attempt to parse string time patterns
-                                    parsed = s.apply(lambda x: pd.to_datetime(x) if isinstance(x, str) else pd.NaT)
-                                    if parsed.notna().mean() > 0.5:
-                                        try:
-                                            return (parsed - parsed.iloc[0]).dt.total_seconds()
-                                        except Exception:
-                                            return pd.to_numeric(s, errors='coerce')
-                                    return pd.to_numeric(s, errors='coerce')
-                            else:
-                                return pd.to_numeric(s, errors='coerce')
-                        # Determine if x variable looks like time
-                        is_time_like = any(k in x_var.lower() for k in ["time", "date", "datetime", "ts"])
-                        x_num = convert_series(x_raw, is_time_like)
-                        y_num = pd.to_numeric(y_raw, errors='coerce')
-                        z_num = pd.to_numeric(z_raw, errors='coerce')
-                        # Drop rows with NaN in any variable
-                        mask = (~x_num.isna()) & (~y_num.isna()) & (~z_num.isna())
-                        if mask.sum() < 3:
-                            ax = self.adv_fig.add_subplot(111)
-                            ax.text(0.5, 0.5, "유효한 데이터가 충분하지 않습니다.", ha='center', va='center')
-                            ax.axis('off')
-                        else:
-                            ax3d = self.adv_fig.add_subplot(111, projection='3d')
-                            ax3d.scatter(x_num[mask], y_num[mask], z_num[mask], c='b', marker='o')
-                            ax3d.set_xlabel(x_var)
-                            ax3d.set_ylabel(y_var)
-                            ax3d.set_zlabel(z_var)
-                            ax3d.set_title(f"3D 시각화: {x_var}, {y_var}, {z_var}")
+                        ax.plot(elapsed, mpt_series, marker='o')
+                        ax.set_xlabel("경과 시간 (초)")
+                        ax.set_ylabel("MPT")
+                        ax.set_title("시간 대비 MPT 변화")
+                        ax.grid(True)
             else:
                 ax = self.adv_fig.add_subplot(111)
                 ax.text(0.5, 0.5, "해당 시각화는 지원되지 않습니다.", ha='center', va='center')
