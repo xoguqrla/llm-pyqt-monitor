@@ -1,3 +1,5 @@
+---
+
 # 🚀 LLM\_PyQt\_Platform
 
 **LLM\_PyQt\_Platform**은 **실시간 데이터 분석, 시각화, 그리고 LLM 기반 질의응답**을 통합한 차세대 분석 플랫폼입니다.
@@ -21,21 +23,21 @@ PyQt 기반의 직관적인 GUI와 Python 생태계를 활용해 **데이터 업
 
 ---
 
-## 🏗️ 아키텍처 (Architecture)
+## 🏗 아키텍처 (Architecture)
 
 ```mermaid
 flowchart TD
-    A[사용자 GUI (PyQt5)] --> B[데이터 관리 모듈]
-    B -->|CSV/DB 업로드| C[PostgreSQL]
-    B -->|요약 통계/전처리| D[Analysis Visualizer]
+    GUI["사용자 GUI (PyQt5)"] --> DataModule["데이터 관리 모듈"]
+    DataModule -->|CSV/DB 업로드| DB[(PostgreSQL)]
+    DataModule --> Visualizer["Analysis Visualizer"]
 
-    A --> E[LLM 분석 모듈]
-    E -->|NLQ → SQL 변환| C
-    E -->|RAG 질의응답| F[Vector DB (Chroma)]
+    GUI --> LLM["LLM 분석 모듈"]
+    LLM -->|NLQ → SQL 변환| DB
+    LLM -->|RAG 질의응답| VectorDB[(Chroma Vector DB)]
 
-    D --> A
-    F --> A
-    C --> A
+    Visualizer --> GUI
+    DB --> GUI
+    VectorDB --> GUI
 ```
 
 * **GUI (PyQt5)** – 사용자가 모든 기능을 한눈에 조작할 수 있는 대시보드
@@ -82,5 +84,63 @@ flowchart TD
 * **Database:** PostgreSQL 17, Chroma (VectorDB)
 * **AI/LLM:** OpenAI API, LangChain
 * **Visualization:** Matplotlib, Plotly
+
+---
+
+## 🛠 설치 및 실행 (Installation & Run)
+
+### 1. 환경 세팅
+
+```bash
+git clone https://github.com/xoguqrla/llm-pyqt-monitor.git
+cd llm-pyqt-monitor
+python -m venv LLMvenv
+source LLMvenv/Scripts/activate   # Windows
+# 또는
+source LLMvenv/bin/activate       # Linux/Mac
+```
+
+### 2. 패키지 설치
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. 실행
+
+```bash
+python -m app.main10_pdf_rag
+```
+
+---
+
+## 🖼 스크린샷 (Screenshots)
+
+| 대시보드                                    | PDF RAG 분석                  | 3D 시각화                      |
+| --------------------------------------- | --------------------------- | --------------------------- |
+| ![dashboard](docs/images/dashboard.png) | ![rag](docs/images/rag.png) | ![sim](docs/images/sim.png) |
+
+---
+
+## 🛤 향후 계획 (Roadmap)
+
+* [ ] 이상 탐지 알고리즘 고도화 (Isolation Forest, DBSCAN)
+* [ ] Digital Twin 연계 3D 시뮬레이션 자동화
+* [ ] 사용자 계정 및 권한 관리 추가
+* [ ] Docker 기반 배포 환경 제공
+
+---
+
+## 🤝 기여 (Contributing)
+
+Pull Request 및 Issue 등록을 환영합니다.
+아이디어 제안, 버그 리포트, 기능 개선 의견 모두 환영합니다.
+
+---
+
+## 📜 라이선스 (License)
+
+본 프로젝트는 MIT License 하에 배포됩니다.
+자세한 내용은 `LICENSE` 파일을 참고하세요.
 
 ---
