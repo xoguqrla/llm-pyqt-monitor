@@ -1,5 +1,3 @@
----
-
 # 🚀 LLM\_PyQt\_Platform
 
 **LLM\_PyQt\_Platform**은 **실시간 데이터 분석, 시각화, 그리고 LLM 기반 질의응답**을 통합한 차세대 분석 플랫폼입니다.
