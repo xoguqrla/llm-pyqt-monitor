@@ -1,1 +1,143 @@
-# llm-pyqt-monitor
+# 🚀 LLM\_PyQt\_Platform
+
+**LLM\_PyQt\_Platform**은 **실시간 데이터 분석, 시각화, 그리고 LLM 기반 질의응답**을 통합한 차세대 분석 플랫폼입니다.
+PyQt 기반의 직관적인 GUI와 Python 생태계를 활용해 **데이터 업로드 → 저장 → 분석 → 시각화 → LLM 분석**까지 한 번에 처리할 수 있습니다.
+
+---
+
+## 🌐 프로젝트 비전 (Vision)
+
+> **데이터 중심(Data-Driven) 의사결정**을 누구나 쉽게.
+>
+> LLM\_PyQt\_Platform은 복잡한 데이터 처리 과정을 하나의 GUI에 통합하여,
+> 연구원·엔지니어·분석가가 **데이터의 흐름을 시각적으로 이해하고,
+> LLM의 도움으로 인사이트를 즉시 얻을 수 있는 환경**을 제공합니다.
+
+**핵심 가치:**
+
+* **직관성** – 코드 없이 GUI로 데이터 탐색 및 분석
+* **신뢰성** – DB·통계 기반 데이터 관리
+* **확장성** – 모듈형 구조로 다양한 산업·연구 환경에 적용 가능
+
+---
+
+## 🏗 아키텍처 (Architecture 1 – 심플 뷰)
+
+```mermaid
+flowchart TD
+    GUI["사용자 GUI (PyQt5)"] --> DataModule["데이터 관리 모듈"]
+    DataModule -->|CSV/DB 업로드| DB[(PostgreSQL)]
+    DataModule --> Visualizer["Analysis Visualizer"]
+
+    GUI --> LLM["LLM 분석 모듈"]
+    LLM -->|NLQ → SQL 변환| DB
+    LLM -->|RAG 질의응답| VectorDB[(Chroma Vector DB)]
+
+    Visualizer --> GUI
+    DB --> GUI
+    VectorDB --> GUI
+```
+
+* **GUI (PyQt5)** – 사용자가 모든 기능을 한눈에 조작할 수 있는 대시보드
+* **데이터 관리 모듈** – CSV/DB 업로드, 자동 통계 요약, DB 연동
+* **PostgreSQL** – 구조화된 데이터 저장소
+* **Analysis Visualizer** – SQL 실행 결과/그래프를 GUI에 출력
+* **LLM 분석 모듈** – NLQ→SQL 변환 및 RAG 기반 질의응답
+* **Vector DB (Chroma)** – 문서 임베딩과 Evidence 기반 검색
+
+---
+
+## 🏗 아키텍처 (Architecture 2 – 상세 뷰)
+
+```mermaid
+flowchart TD
+    subgraph GUI["사용자 GUI (PyQt5)"]
+        U1["CSV 업로드/삭제"]
+        U2["질문 입력 (NLQ)"]
+        U3["결과 확인 (Table/Chart/Evidence/Report)"]
+    end
+
+    subgraph DataModule["데이터 관리 모듈"]
+        D1["CSV 로드 (pandas)"]
+        D2["메타데이터 생성 (JSON)"]
+        D3["files_registry.json 기록"]
+    end
+
+    subgraph DB["PostgreSQL / SQLite"]
+        T1["CSV 데이터 테이블 (t_filename)"]
+    end
+
+    subgraph VectorDB["Chroma Vector DB"]
+        V1["file_meta_openai (CSV 메타데이터)"]
+        V2["expert_comments (전문가 코멘트)"]
+    end
+
+    subgraph LLM["LLM 분석 모듈"]
+        L1["프롬프트 빌더 (build_prompt)"]
+        L2["NLQ → SQL 변환 (generate_sql_from_nlq)"]
+        L3["SQL 실행 결과 해석"]
+        L4["RAG 검색 (메타데이터+전문가 코멘트)"]
+        L5["최종 응답 생성 (llm_final_only)"]
+    end
+
+    subgraph Visualizer["Analysis Visualizer (Matplotlib / PyVista)"]
+        VIZ1["SQL 결과 시각화"]
+        VIZ2["메타데이터 기반 차트"]
+    end
+
+    %% Flows
+    U1 --> D1 --> D2 --> DB
+    D2 --> V1
+    D3 --> GUI
+
+    U2 --> LLM
+    LLM -->|SQL 실행| DB
+    LLM -->|RAG 질의응답| VectorDB
+
+    DB --> LLM
+    VectorDB --> LLM
+    LLM --> U3
+
+    Visualizer --> U3
+    DB --> Visualizer
+```
+
+---
+
+## ✨ 주요 기능 (Features)
+
+* **데이터 관리 (Data Management)**
+
+  * CSV/DB 업로드 및 전처리
+  * PostgreSQL 연동으로 안정적인 데이터 관리
+  * 자동 통계 요약 (row count, mean, max, min, std 등)
+
+* **데이터 분석 & 시각화 (Analysis & Visualization)**
+
+  * PyQt 대시보드에서 표/그래프 실시간 출력
+  * Matplotlib, PyVista 기반 고급 시각화
+  * SQL 결과와 Evidence 패널 자동 연동
+
+* **LLM 기반 분석 (LLM-Powered Analysis)**
+
+  * LangChain + OpenAI API 연동
+  * 자연어 질의(NLQ) → SQL 자동 변환
+  * RAG 기반 CSV/메타데이터/전문가 코멘트 질의응답
+  * Evidence 기반 구조화된 응답 제공
+
+* **시뮬레이션 및 확장성 (Simulation & Extensibility)**
+
+  * PyVista 기반 3D 데이터 시각화 및 시뮬레이터
+  * 모듈형 구조로 다양한 분석 시나리오에 확장 가능
+
+---
+
+## 📚 기술 스택 (Tech Stack)
+
+* **Frontend (GUI):** PyQt5, PyVista
+* **Backend:** Python 3.11
+* **Database:** PostgreSQL 17, SQLite, Chroma (VectorDB)
+* **AI/LLM:** OpenAI API, LangChain
+* **Visualization:** Matplotlib, Plotly
+
+---
