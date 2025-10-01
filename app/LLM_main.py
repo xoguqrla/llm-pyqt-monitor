@@ -35,7 +35,7 @@ from core.rag_ops import (
 )
 from core.llm_ops import build_llm, build_sql_chain, generate_sql_from_nlq
 from core.plotting import df_to_table, plot_df_line
-from core.files_registry import upsert_entry, load_registry
+from core.files_registry import upsert_entry, load_registry, save_registry  # save_registry 추가
 
 # --- optional: metadata build & indexing scripts ---
 try:
@@ -257,7 +257,7 @@ def llm_checks_only(llm, question: str, df_snip: str, meta_snip: str) -> str:
         f"[질문]\n{question}\n\n"
         f"[SQL 미리보기(표 일부)]\n{df_snip or '(없음)'}\n\n"
         f"[메타 요약 일부]\n{meta_snip or '(없음)'}\n\n"
-        "- …\n- …\n- …"
+        "- …\n        - …\n        - …"
     )
     return llm.invoke(prompt).content
 #.
@@ -343,10 +343,13 @@ class MainWindow(QWidget):
         btn_row_saved = QHBoxLayout()
         self.btn_refresh_csv_saved = QPushButton("새로고침")
         self.btn_refresh_csv_saved.clicked.connect(self.refresh_csv_saved_list)
+        self.btn_set_golden = QPushButton("🌟 정답 공정으로 설정")
+        self.btn_set_golden.clicked.connect(self.on_set_golden_standard)
         self.btn_del_csv_saved = QPushButton("선택 삭제")
         self.btn_del_csv_saved.clicked.connect(lambda: self.on_delete_files(target="saved"))
         btn_row_saved.addWidget(self.btn_refresh_csv_saved)
         btn_row_saved.addStretch(1)
+        btn_row_saved.addWidget(self.btn_set_golden)
         btn_row_saved.addWidget(self.btn_del_csv_saved)
         ls.addLayout(btn_row_saved)
 
@@ -493,6 +496,14 @@ class MainWindow(QWidget):
             selected_context = "[선택된 데이터 파일 요약]\n" + summary + "\n\n"
             full_question = selected_context + full_question
         
+            try:
+                selected_tables = [table_name_from_file(n) for n in selected]
+                if selected_tables:
+                    selected_context += "[테이블 힌트]\n" + ", ".join(f'"{t}"' for t in selected_tables) + "\n\n"
+                    full_question = selected_context + full_question
+            except Exception:
+                pass
+
         try:
             with self.engine.begin() as c:
                 rows = c.exec_driver_sql("SELECT content FROM expert_comments").fetchall()
@@ -582,67 +593,76 @@ class MainWindow(QWidget):
         except: pass
 
         def _task(file_paths, progress_callback, cancel_event):
-            ok, fail, results = 0, [], []
-            for i, p_str in enumerate(file_paths, 1):
+            results = []  # 처리 결과를 담을 리스트
+            errors = []
+            for i, p in enumerate(file_paths):
                 if cancel_event.is_set():
                     break
-                path = Path(p_str)
-                progress_callback(i - 1, f"{path.name} 처리 중...")
+                path = Path(p)
+                progress_callback(i, f"{path.name} 처리 중...")
                 try:
-                    df, meta, _ = load_and_meta(path, self.s.meta_json_dir)
-                    entry = upsert_entry(path, rows=meta["rows"], cols=meta["cols"], status="indexed")
-                    upsert_texts(self.chroma, entry.file_id, build_embedding_texts_from_meta(meta))
-                    table = table_name_from_file(path.name)
-                    ingest_df(self.engine, df, table)
-                    ensure_indexes(self.engine, table)
+                    # Golden Standard 파일 경로를 load_and_meta에 전달
+                    golden_path = self.s.data_dir / "golden_standard.json"
+                    if not golden_path.exists():
+                        golden_path = None
+
+                    df, meta, _ = load_and_meta(path, self.s.meta_json_dir, golden_standard_path=golden_path)
                     
+                    # CSV → DB 인제스트 (테이블 생성/갱신)
+                    from core.db_ops import table_name_from_file, ingest_df, ensure_indexes
+
+                    table = table_name_from_file(path.name)
                     try:
-                        missing_total = int(df.isna().sum().sum())
-                    except Exception:
-                        missing_total = 0
-                    try:
-                        desc_df = df.describe(include="all")
-                        desc_str = desc_df.to_string(max_cols=6, max_rows=10)
-                    except Exception:
-                        desc_str = ""
-                    try:
-                        preview_df = df.head(20)
-                        preview_str = preview_df.to_string(index=False)
-                    except Exception:
-                        preview_str = ""
-                    results.append((path.name, meta["rows"], meta["cols"], missing_total, desc_str, preview_str, df))
-                    ok += 1
+                        ingest_df(self.engine, df, table)      # DB에 테이블 업서트
+                        ensure_indexes(self.engine, table)     # (있으면) 인덱스 보장
+                    except Exception as e:
+                        errors.append(f"{path.name}: DB ingest 실패 - {e}")
+
+                    total_rows = len(df)
+                    total_cols = len(df.columns)
+                    
+                    # path (Path object) 전달
+                    entry = upsert_entry(path, rows=total_rows, cols=total_cols, status="indexed")
+                    
+                    # RAG 업서트
+                    upsert_texts(self.chroma, entry.file_id, build_embedding_texts_from_meta(meta))
+                    
+                    # _done 함수에 전달할 결과 추가
+                    results.append((path.name, total_rows, total_cols, meta, df))
                 except Exception as e:
-                    fail.append(f"{path.name}: {e}")
-            return ok, fail, results
+                    errors.append(f"{path.name}: {e}")
+
+            return results, errors
 
         def _done(res, err):
             prog.close()
             if err:
                 return QMessageBox.critical(self, "CSV 처리 오류", str(err))
-            ok, fail, results = res
+            
+            results, errors = res
             last_df = None
-            for (name, rows, cols, missing_total, desc_str, preview_str, df) in results:
+            
+            for (name, rows, cols, meta, df) in results:
                 it = QListWidgetItem(f"{name} ({rows}x{cols})")
                 it.setData(Qt.UserRole, name)
                 it.setCheckState(Qt.Unchecked)
                 self.csv_new_list.addItem(it)
                 self.chat.add_bot(f"✅ 업로드 완료: {name}")
-                summary_text = (
-                    f"[파일] {name}\n"
-                    f"- 행 수: {rows}\n"
-                    f"- 열 수: {cols}\n"
-                    f"- 결측치 총합: {missing_total}\n"
-                )
-                if desc_str:
-                    summary_text += f"\n[통계 요약]\n{desc_str}\n"
-                if preview_str:
-                    summary_text += f"\n[미리보기]\n{preview_str}\n"
+
+                # 보고서 탭에 요약 정보 추가
+                summary_text = f"[파일] {name}\n- 행 수: {rows}\n- 열 수: {cols}\n"
                 try:
-                    self.report.append(summary_text)
+                    # 비드별 점수 요약 (있을 경우)
+                    stats = meta.get("process_summary_statistics", {}).get("by_bead_number", {})
+                    if stats:
+                        summary_text += "- 비드별 안정성 점수 요약:\n"
+                        for bead_num, bead_data in list(stats.items())[:5]: # 상위 5개만 표시
+                            score = bead_data.get('process_stability_score', {}).get('final_score', 'N/A')
+                            summary_text += f"  - Bead #{bead_num}: {score}점\n"
                 except Exception:
-                    current_text = self.report.toPlainText()
-                    self.report.setPlainText(current_text + "\n" + summary_text)
+                    pass # 요약 생성 실패 시 무시
+                
+                self.report.append(summary_text)
                 last_df = df
             
             self.refresh_csv_saved_list()
@@ -651,59 +671,97 @@ class MainWindow(QWidget):
                 self.current_df = last_df
                 try:
                     self.render_all(last_df, sql=None)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Render error after upload: {e}")
             
-            summary_msg = f"성공: {ok}건"
-            if fail:
-                summary_msg += f"\n실패: {len(fail)}건\n" + "\n".join(fail)
+            summary_msg = f"성공: {len(results)}건"
+            if errors:
+                summary_msg += f"\n실패: {len(errors)}건\n" + "\n".join(errors)
             QMessageBox.information(self, "CSV 처리 완료", summary_msg)
 
         worker, thread = run_in_thread(self, _task, _done, paths, progress_callback=None, cancel_event=cancel_event)
         worker.progress.connect(lambda i, msg: (prog.setValue(i), prog.setLabelText(msg)))
 
+    def on_set_golden_standard(self):
+        """선택된 파일을 Golden Standard로 설정하고 meta json을 복사합니다."""
+        items = [self.csv_saved_list.item(i) for i in range(self.csv_saved_list.count()) if self.csv_saved_list.item(i).checkState() == Qt.Checked]
+        if len(items) != 1:
+            return QMessageBox.warning(self, "선택 오류", "정확히 하나의 파일을 선택(체크)해야 합니다.")
+
+        item = items[0]
+        fname = item.data(Qt.UserRole)
+        file_id = self.file_ids.get(fname)
+        
+        if not file_id:
+            return QMessageBox.warning(self, "오류", "선택된 파일의 ID를 찾을 수 없습니다.")
+
+        source_meta_path = None
+        try:
+            entries = load_registry()
+            entry = entries.get(file_id)
+            if not entry or not entry.get("path"):
+                return QMessageBox.warning(self, "오류", "레지스트리에서 파일 경로를 찾을 수 없습니다.")
+            
+            p = Path(entry["path"])
+            
+            # Golden Standard로 지정할 파일의 메타데이터를 생성/로드하여 정확한 경로 확보
+            # (load_and_meta는 2개 인자만 받는다)
+            _, meta, meta_path = load_and_meta(p, self.s.meta_json_dir)
+            
+            if not meta_path.exists():
+                 return QMessageBox.warning(self, "오류", f"원본 메타데이터 파일을 찾을 수 없습니다:\n{meta_path}")
+            source_meta_path = meta_path
+
+        except Exception as e:
+            return QMessageBox.critical(self, "메타데이터 경로 조회 오류", f"메타데이터 경로를 찾는 중 오류 발생:\n{e}")
+
+        # 대상 경로로 복사
+        if source_meta_path:
+            target_path = self.s.data_dir / "golden_standard.json"
+            try:
+                import shutil
+                shutil.copy(source_meta_path, target_path)
+                QMessageBox.information(self, "성공", f"'{fname}'을(를) Golden Standard로 설정했습니다.\n이제부터 업로드되는 파일은 이 공정을 기준으로 평가됩니다.")
+            except Exception as e:
+                QMessageBox.critical(self, "파일 복사 오류", f"Golden Standard 파일 저장 실패:\n{e}")
+
     def on_delete_files(self, target: str):
+        """files_registry.json에서 선택한 파일 엔트리를 삭제하고 목록을 갱신"""
         widget = self.csv_new_list if target == "new" else self.csv_saved_list
         items = [widget.item(i) for i in range(widget.count()) if widget.item(i).checkState() == Qt.Checked]
-        if not items: return QMessageBox.information(self, "알림", "체크된 파일이 없습니다.")
-        if QMessageBox.question(self, "삭제 확인", f"{len(items)}개 파일을 삭제합니다. 계속할까요?") != QMessageBox.Yes: return
+        if not items:
+            return QMessageBox.warning(self, "선택 오류", "삭제할 파일을 하나 이상 선택해야 합니다.")
 
-        errors = []
-        fnames_to_delete = [it.data(Qt.UserRole) for it in items]
+        msg = "선택한 파일을 정말 삭제할까요?\n\n" + "\n".join(item.data(Qt.UserRole) for item in items)
+        if QMessageBox.question(self, "확인", msg) != QMessageBox.Yes:
+            return
 
-        for fname in fnames_to_delete:
-            try:
-                table = table_name_from_file(fname)
-                with self.engine.begin() as c:
-                    c.exec_driver_sql(f'DROP TABLE IF EXISTS "{table}"')
-                
+        try:
+            reg = load_registry()
+            fnames = [it.data(Qt.UserRole) for it in items]
+            # file_id 매핑을 사용하여 reg에서 제거
+            for fname in fnames:
                 fid = self.file_ids.get(fname)
-                if fid:
-                    self.chroma.delete(ids=[f"{fid}:{i:04d}" for i in range(2000)])
-                
-                registry_path = Path(self.s.data_dir) / "files_registry.json"
-                if registry_path.exists():
-                    with open(registry_path, "r+", encoding="utf-8") as f:
-                        entries = json.load(f)
-                        fid_to_del = self.file_ids.get(fname)
-                        if fid_to_del in entries:
-                            del entries[fid_to_del]
-                        f.seek(0); f.truncate()
-                        json.dump(entries, f, indent=2)
+                if fid and fid in reg:
+                    del reg[fid]
+            save_registry(reg)
+        except Exception as e:
+            print(f"[레지스트리 삭제 오류] {e}")
 
-            except Exception as e:
-                errors.append(f"{fname}: {e}")
+        # 왼쪽 리스트 UI에서도 제거
+        if target == "new":
+            for i in reversed(range(self.csv_new_list.count())):
+                it = self.csv_new_list.item(i)
+                if it.data(Qt.UserRole) in fnames:
+                    self.csv_new_list.takeItem(i)
+        else:
+            for i in reversed(range(self.csv_saved_list.count())):
+                it = self.csv_saved_list.item(i)
+                if it.data(Qt.UserRole) in fnames:
+                    self.csv_saved_list.takeItem(i)
 
         self.refresh_csv_saved_list()
-        for i in reversed(range(self.csv_new_list.count())):
-            it = self.csv_new_list.item(i)
-            if it.data(Qt.UserRole) in fnames_to_delete:
-                self.csv_new_list.takeItem(i)
-
-        if errors:
-            self.chat.add_bot("일부 삭제 실패:\n" + "\n".join(errors))
-        else:
-            self.chat.add_bot("🗑️ 선택 파일 삭제 완료")
+        QMessageBox.information(self, "삭제 완료", f"선택한 {len(items)}개의 파일이 삭제되었습니다.")
 #.
     #   on_ask 함수 시작~~
     # LLM 질의 (CSV/DB + 메타)
@@ -727,9 +785,12 @@ class MainWindow(QWidget):
         tone = self.tone.currentText()
         self.set_busy(True)
 
+        # def _task():의 목적 : 목적: 한 번의 사용자 질문을 
+        # **SQL 경로(SQL Evidence)**와 **RAG 경로(Vector Evidence)**로 처리하고, 
+        # 그 결과를 **LLM 서술(Answer)**과 Evidence 문자열로 동시에 만들어 반환.
         def _task():
-            sql, df, err_sql = "", None, ""
-            prompt_for_llm = self.build_prompt(q)
+            sql, df, err_sql = "", None, ""   # What: 변수 초기값 설정/ Why: 아래 분기에서 값 유무로 상태 판단(예: 오류 메시지를 Evidence에 넣을지) 하기 위해 기본값을 명확히 세팅.
+            prompt_for_llm = self.build_prompt(q) # 사용자 질문 q에 최근 대화 ()
             try:
                 sql = generate_sql_from_nlq(self.sql_chain, prompt_for_llm, engine_or_url=self.engine)
                 df = run_sql(self.engine, sql)
@@ -737,6 +798,24 @@ class MainWindow(QWidget):
                     df = None
             except Exception as e:
                 err_sql = str(e)
+
+            # --- 폴백: SQL이 없거나 실패하면 CSV에서 바로 스니펫 구성 ---
+            if df is None:
+                try:
+                    sel = self.get_selected_filenames()
+                    if sel:
+                        fname = sel[0]
+                        entries = load_registry()
+                        file_id = self.file_ids.get(fname)
+                        entry = entries.get(file_id, {})
+                        path_str = entry.get("path")
+                        if path_str and os.path.exists(path_str):
+                            df_fb, _, _ = load_and_meta(Path(path_str), self.s.meta_json_dir)
+                            # mpt가 있으면 미리보기용으로 사용
+                            if "mpt" in df_fb.columns:
+                                df = df_fb[["time", "mpt"]].head(1000)
+                except Exception:
+                    pass
             
             try:
                 docs = retrieve_meta(self.chroma, prompt_for_llm, 6)

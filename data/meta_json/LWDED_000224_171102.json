@@ -1,27 +1,21 @@
 {
-  "file": "003_1_data.csv",
+  "process_id": "LWDED_000224_171102",
+  "process_datetime": "1900-02-24T17:11:02.781000",
+  "file_name": "20250224_Jisu_recorn_cont3_data.csv",
+  "file_path": "C:\\Users\\KAMIC^^\\Desktop\\20250224_Jisu_recorn_cont3_data.csv",
   "rows": 1750,
   "cols": 19,
+  "file": "20250224_Jisu_recorn_cont3_data.csv",
   "columns": {
     "time": {
-      "dtype": "object",
+      "dtype": "datetime64[ns]",
       "non_null": 1750,
-      "nulls": 0,
-      "sample": [
-        "02_24_17_11_02_781",
-        "02_24_17_11_02_854",
-        "02_24_17_11_02_876"
-      ]
+      "nulls": 0
     },
     "x": {
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 10.04,
@@ -32,11 +26,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": -0.04,
         "max": -0.0,
@@ -47,11 +36,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 46.5,
@@ -62,11 +46,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": -0.0,
         "max": -0.0,
@@ -77,11 +56,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 0.0,
@@ -92,11 +66,6 @@
       "dtype": "int64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0",
-        "0",
-        "0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 0.0,
@@ -107,11 +76,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 2.0,
@@ -122,11 +86,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "3.5156",
-        "3.5156",
-        "3.5156"
-      ],
       "stats": {
         "min": 3.5156,
         "max": 3.5156,
@@ -137,11 +96,6 @@
       "dtype": "int64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0",
-        "0",
-        "0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 898.0,
@@ -152,11 +106,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 0.01,
@@ -167,11 +116,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 1.9818,
@@ -182,11 +126,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "706.25911",
-        "706.51717",
-        "706.51717"
-      ],
       "stats": {
         "min": 706.00105,
         "max": 1212.3147,
@@ -197,11 +136,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 77.751,
@@ -212,11 +146,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 0.0,
@@ -227,11 +156,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "2.45838",
-        "2.43258",
-        "2.41839"
-      ],
       "stats": {
         "min": 2.02097,
         "max": 2.6287,
@@ -242,11 +166,6 @@
       "dtype": "float64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "4.92415",
-        "4.92157",
-        "4.92028"
-      ],
       "stats": {
         "min": 0.24294,
         "max": 4.93834,
@@ -257,11 +176,6 @@
       "dtype": "int64",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "6",
-        "6",
-        "6"
-      ],
       "stats": {
         "min": 6.0,
         "max": 6.0,
@@ -272,16 +186,91 @@
       "dtype": "bool",
       "non_null": 1750,
       "nulls": 0,
-      "sample": [
-        "False",
-        "False",
-        "False"
-      ],
       "stats": {
         "min": 0.0,
         "max": 1.0,
         "mean": 0.0005714285714285715
       }
     }
+  },
+  "process_metrics": {
+    "total_time_sec": 193.577,
+    "laser_on_time_sec": 0.136,
+    "laser_off_time_sec": 193.441,
+    "utilization_ratio": 0.0007025628044654066,
+    "avg_sampling_rate_hz": 9.0403302045181,
+    "energy_input_total": 122.12800000000001,
+    "cum_volume_est": 0.0,
+    "aw_mean": 0.0,
+    "aw_peak": 0.0,
+    "volume_rate_mean": 0.0,
+    "volume_rate_std": 0.0,
+    "wire_feed_idle_time_sec": 0.0,
+    "wire_feed_efficiency": 1.0,
+    "laser_power_std": 21.46630582364571,
+    "scan_speed_std": 0.00161346912809942,
+    "mpt_all": {
+      "max": 1212.3147,
+      "mean": 707.2217474228572,
+      "std": 16.42107876774723,
+      "median": 706.51717,
+      "robust_std": 0.0
+    },
+    "mpt_on": {
+      "max": 930.25516,
+      "mean": 930.25516,
+      "std": NaN,
+      "median": 930.25516,
+      "robust_std": 0.0
+    },
+    "mpt_valid": {
+      "max": 930.25516,
+      "mean": 930.25516,
+      "std": NaN,
+      "median": 930.25516,
+      "robust_std": 0.0
+    },
+    "load_all": {
+      "max": 2.6287,
+      "mean": 2.441383828571429,
+      "std": 0.03078145323787412,
+      "median": 2.4429,
+      "robust_std": 0.011475323999999459
+    },
+    "load_on": {
+      "max": 2.02097,
+      "mean": 2.02097,
+      "std": NaN,
+      "median": 2.02097,
+      "robust_std": 0.0
+    },
+    "load_valid": {
+      "max": 2.02097,
+      "mean": 2.02097,
+      "std": NaN,
+      "median": 2.02097,
+      "robust_std": 0.0
+    },
+    "on_ratio": 0.0007025628044654066,
+    "valid_ratio": 0.0007025628044654066,
+    "bead_count": 1,
+    "mpt_max": 1212.3147,
+    "mpt_mean": 707.2217474228572,
+    "mpt_std": 16.42107876774723
+  },
+  "process_similarity_score": {
+    "utilization_ratio_similarity": 0.2,
+    "energy_input_total_similarity": 0.0,
+    "cum_volume_est_similarity": 0.0,
+    "wire_feed_efficiency_similarity": 99.3,
+    "mpt_mean_similarity": 51.4,
+    "mpt_std_similarity": 26.8,
+    "final_similarity_score": 25.6
+  },
+  "process_stability_score": {
+    "temperature_stability": 100.0,
+    "temperature_suitability": 3.0,
+    "load_stability": 100.0,
+    "final_score": 70.9
   }
 }

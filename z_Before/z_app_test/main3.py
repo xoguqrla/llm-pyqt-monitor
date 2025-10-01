@@ -26,7 +26,7 @@ from core.llm_ops import (
     build_llm, build_sql_chain, generate_sql_from_nlq,
     rag_answer, chat_answer
 )
-from core2.hybrid import route, fuse_sql_and_rag
+from core.hybrid import route, fuse_sql_and_rag
 from core.plotting import df_to_table, plot_df_line, build_report_text
 from core.files_registry import upsert_entry  # SHA256 기반 파일ID
 

@@ -1,27 +1,21 @@
 {
-  "file": "004_1_data.csv",
+  "process_id": "LWDED_000224_171544",
+  "process_datetime": "1900-02-24T17:15:44.600000",
+  "file_name": "20250224_Jisu_recorn_cont4_data.csv",
+  "file_path": "C:\\Users\\KAMIC^^\\Desktop\\20250224_Jisu_recorn_cont4_data.csv",
   "rows": 7154,
   "cols": 19,
+  "file": "20250224_Jisu_recorn_cont4_data.csv",
   "columns": {
     "time": {
-      "dtype": "object",
+      "dtype": "datetime64[ns]",
       "non_null": 7154,
-      "nulls": 0,
-      "sample": [
-        "02_24_17_15_44_600",
-        "02_24_17_15_44_660",
-        "02_24_17_15_44_676"
-      ]
+      "nulls": 0
     },
     "x": {
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "5.0",
-        "5.0",
-        "5.0"
-      ],
       "stats": {
         "min": -11.58,
         "max": 11.68,
@@ -32,11 +26,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "-0.01",
-        "-0.01",
-        "-0.01"
-      ],
       "stats": {
         "min": -50.57,
         "max": 11.61,
@@ -47,11 +36,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "13.5",
-        "13.5",
-        "13.5"
-      ],
       "stats": {
         "min": 13.49,
         "max": 46.5,
@@ -62,11 +46,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "-0.0",
-        "-0.0",
-        "-0.0"
-      ],
       "stats": {
         "min": -0.0,
         "max": -0.0,
@@ -77,11 +56,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 0.0,
@@ -92,11 +66,6 @@
       "dtype": "int64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "0",
-        "0",
-        "0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 0.0,
@@ -107,11 +76,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "2.0",
-        "2.0",
-        "2.0"
-      ],
       "stats": {
         "min": 0.01,
         "max": 2.0,
@@ -122,11 +86,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "3.5156",
-        "3.5156",
-        "3.5156"
-      ],
       "stats": {
         "min": 3.5156,
         "max": 3.5156,
@@ -137,11 +96,6 @@
       "dtype": "int64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "0",
-        "0",
-        "0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 2850.0,
@@ -152,11 +106,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 0.01,
@@ -167,11 +116,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 3.5387,
@@ -182,11 +126,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "706.25911",
-        "706.51717",
-        "706.51717"
-      ],
       "stats": {
         "min": 704.45269,
         "max": 2004.55878,
@@ -197,11 +136,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 1768.401,
@@ -212,11 +146,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "0.0",
-        "0.0",
-        "0.0"
-      ],
       "stats": {
         "min": 0.0,
         "max": 10.001180910772486,
@@ -227,11 +156,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "2.07129",
-        "2.07259",
-        "2.07388"
-      ],
       "stats": {
         "min": 1.94614,
         "max": 2.78999,
@@ -242,11 +166,6 @@
       "dtype": "float64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "4.92157",
-        "4.92544",
-        "4.92544"
-      ],
       "stats": {
         "min": 0.11391,
         "max": 4.93189,
@@ -257,11 +176,6 @@
       "dtype": "int64",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "6",
-        "6",
-        "6"
-      ],
       "stats": {
         "min": 6.0,
         "max": 6.0,
@@ -272,16 +186,91 @@
       "dtype": "bool",
       "non_null": 7154,
       "nulls": 0,
-      "sample": [
-        "False",
-        "False",
-        "False"
-      ],
       "stats": {
         "min": 0.0,
         "max": 1.0,
         "mean": 0.06248252725747833
       }
     }
+  },
+  "process_metrics": {
+    "total_time_sec": 846.347,
+    "laser_on_time_sec": 104.79500000000004,
+    "laser_off_time_sec": 741.5519999999999,
+    "utilization_ratio": 0.12382037154973084,
+    "avg_sampling_rate_hz": 8.452797729536467,
+    "energy_input_total": 294128.06700000004,
+    "cum_volume_est": 316.2261431668087,
+    "aw_mean": 199.4197872137654,
+    "aw_peak": 11579.871255038572,
+    "volume_rate_mean": 0.19950344815092683,
+    "volume_rate_std": 0.8591669707759331,
+    "wire_feed_idle_time_sec": 0.178,
+    "wire_feed_efficiency": 0.9983014456796603,
+    "laser_power_std": 656.822915790224,
+    "scan_speed_std": 0.0026736550813962843,
+    "mpt_all": {
+      "max": 2004.55878,
+      "mean": 788.6377731520827,
+      "std": 292.3575311842808,
+      "median": 706.51717,
+      "robust_std": 0.0
+    },
+    "mpt_on": {
+      "max": 2004.55878,
+      "mean": 1871.7387253467564,
+      "std": 115.28332839677913,
+      "median": 1879.65776,
+      "robust_std": 48.20756925600007
+    },
+    "mpt_valid": {
+      "max": 2004.55878,
+      "mean": 1881.4717697737558,
+      "std": 65.03526055194857,
+      "median": 1880.04485,
+      "robust_std": 46.86847011000015
+    },
+    "load_all": {
+      "max": 2.78999,
+      "mean": 2.4348101859099804,
+      "std": 0.05870244333711386,
+      "median": 2.43516,
+      "robust_std": 0.005737662000000059
+    },
+    "load_on": {
+      "max": 2.48032,
+      "mean": 2.3665068903803133,
+      "std": 0.0986742637785397,
+      "median": 2.39903,
+      "robust_std": 0.07651698599999956
+    },
+    "load_valid": {
+      "max": 2.48032,
+      "mean": 2.3685123076923076,
+      "std": 0.0958639753987022,
+      "median": 2.3996750000000002,
+      "robust_std": 0.07556070899999956
+    },
+    "on_ratio": 0.12382037154973084,
+    "valid_ratio": 0.12343518674964288,
+    "bead_count": 1,
+    "mpt_max": 2004.55878,
+    "mpt_mean": 788.6377731520827,
+    "mpt_std": 292.3575311842808
+  },
+  "process_similarity_score": {
+    "utilization_ratio_similarity": 31.1,
+    "energy_input_total_similarity": 46.0,
+    "cum_volume_est_similarity": 47.2,
+    "wire_feed_efficiency_similarity": 99.5,
+    "mpt_mean_similarity": 96.1,
+    "mpt_std_similarity": 93.9,
+    "final_similarity_score": 69.0
+  },
+  "process_stability_score": {
+    "temperature_stability": 100.0,
+    "temperature_suitability": 91.8,
+    "load_stability": 100.0,
+    "final_score": 97.5
   }
 }

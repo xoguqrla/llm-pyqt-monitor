@@ -35,7 +35,7 @@ from core.files_registry import upsert_entry
 
 # --- Analysis & Agent ---
 from langchain.memory import ConversationBufferMemory
-from core2.agent import build_agent
+from core.agent import build_agent
 
 # Optional metadata scripts
 try:

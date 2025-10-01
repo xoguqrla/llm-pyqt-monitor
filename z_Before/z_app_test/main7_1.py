@@ -394,7 +394,7 @@ from core.plotting import df_to_table, plot_df_line
 from core.files_registry import upsert_entry
 
 from langchain.memory import ConversationBufferMemory
-from core2.agent import build_agent
+from core.agent import build_agent
 
 try:
     from scripts.build_metadata import build_for_table as _build_meta_for_table

@@ -1,0 +1,142 @@
+[
+  {
+    "column": "process_id",
+    "name": "공정 식별자",
+    "description": "해당 LW-DED 데이터의 고유 번호로, 추적 및 관리에 사용."
+  },
+  {
+    "column": "process_datetime",
+    "name": "공정 시각",
+    "description": "공정 시작/기록 시각(ISO8601). 시간 기반 분석 및 이벤트 추적에 활용."
+  },
+  {
+    "column": "file_name",
+    "name": "파일명",
+    "description": "원본 데이터 파일명. 실험 기록 관리 및 데이터 복원에 필수."
+  },
+  {
+    "column": "file_path",
+    "name": "파일 경로",
+    "description": "원본 데이터 파일 경로. 추적, 재현성 확보에 사용."
+  },
+  {
+    "column": "rows",
+    "name": "행 개수",
+    "description": "데이터 샘플(행) 수. 공정 시간 길이 및 분석 범위를 나타냄."
+  },
+  {
+    "column": "cols",
+    "name": "열 개수",
+    "description": "측정 변수(열) 수. 센서/공정 변수 개수를 의미."
+  },
+  {
+    "column": "time",
+    "name": "시간",
+    "description": "데이터 샘플링 시각. 센서 동기화 및 시계열 분석 기준."
+  },
+  {
+    "column": "x",
+    "name": "헤드 위치 X",
+    "description": "로봇 또는 작업 헤드의 X 좌표. 궤적 품질, 적층 경로 분석에 사용."
+  },
+  {
+    "column": "y",
+    "name": "헤드 위치 Y",
+    "description": "로봇 또는 작업 헤드의 Y 좌표. 궤적 품질, 적층 경로 분석에 사용."
+  },
+  {
+    "column": "z",
+    "name": "헤드 위치 Z",
+    "description": "로봇 또는 작업 헤드의 Z 좌표. 층 높이, 증착 경로 분석에 사용."
+  },
+  {
+    "column": "e1",
+    "name": "예비 센서1",
+    "description": "예비 또는 에러 채널. 현재는 항상 0이지만 확장용으로 존재."
+  },
+  {
+    "column": "e2",
+    "name": "예비 센서2",
+    "description": "예비 또는 에러 채널. 현재는 항상 0이지만 확장용으로 존재."
+  },
+  {
+    "column": "s_lp",
+    "name": "Set Laser Power",
+    "description": "설정된 레이저 출력값. 목표 출력, 제어 신호를 의미."
+  },
+  {
+    "column": "s_rs",
+    "name": "Set Robot Speed",
+    "description": "설정된 로봇 이송 속도. 궤적 제어 및 공정 계획에 사용."
+  },
+  {
+    "column": "s_ws",
+    "name": "Set Wire Speed",
+    "description": "설정된 와이어 공급 속도. 용융량 제어 및 증착 품질에 영향."
+  },
+  {
+    "column": "r_lp",
+    "name": "Real Laser Power",
+    "description": "실측 레이저 출력값. 실제 용융 에너지 투입량을 의미."
+  },
+  {
+    "column": "r_rs",
+    "name": "Real Robot Speed",
+    "description": "실측 로봇 이송 속도. 궤적 정확도와 공정 제어 분석에 활용."
+  },
+  {
+    "column": "r_ws",
+    "name": "Real Wire Speed",
+    "description": "실측 와이어 공급 속도. 실제 적층량과 공급 효율 분석에 사용."
+  },
+  {
+    "column": "mpt",
+    "name": "Melt Pool Temperature",
+    "description": "용융풀의 온도. 공정 안정성과 품질을 좌우하는 핵심 변수."
+  },
+  {
+    "column": "mpa",
+    "name": "Melt Pool Area",
+    "description": "용융풀 단면적. 층 두께 및 형상 분석에 활용."
+  },
+  {
+    "column": "mpw",
+    "name": "Melt Pool Width",
+    "description": "용융풀 폭. 적층 균일성 및 결합력 평가에 사용."
+  },
+  {
+    "column": "load",
+    "name": "Process Load",
+    "description": "로봇/장비에 걸리는 하중. 장비 안정성과 공정 이상 감지 지표."
+  },
+  {
+    "column": "contact",
+    "name": "Contact Force",
+    "description": "노즐과 증착면의 접촉력. 부착 품질과 표면 안정성을 좌우."
+  },
+  {
+    "column": "bead_number",
+    "name": "Bead Number",
+    "description": "증착 비드의 순번. 여러 층/패스 관리와 품질 분석에 활용."
+  },
+  {
+    "column": "laser_on",
+    "name": "Laser On Flag",
+    "description": "레이저 ON/OFF 상태. 에너지 주입 구간 식별에 사용."
+  },
+  {
+    "column": "process_metrics",
+    "name": "Process Metrics",
+    "description": "공정 요약 통계값 집합. 시간, 에너지, 증착량, 안정성 등을 종합적으로 기록."
+  },
+  {
+    "column": "process_similarity_score",
+    "name": "Process Similarity Score",
+    "description": "타 공정 대비 유사성 지표. 과거 데이터와 비교해 품질 수준을 정량화."
+  },
+  {
+    "column": "process_stability_score",
+    "name": "Process Stability Score",
+    "description": "온도, 하중 안정성을 바탕으로 한 종합 안정도 평가 점수."
+  }
+]

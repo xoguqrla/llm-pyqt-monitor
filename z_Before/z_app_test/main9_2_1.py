@@ -39,7 +39,7 @@ from core.llm_ops import build_llm, build_sql_chain, generate_sql_from_nlq
 from core.plotting import df_to_table, plot_df_line
 from core.files_registry import upsert_entry
 # ★ v2 셀렉터(analysis_visualizer.py)에서 버전 선택하도록 가져오기
-from core2.analysis_visualizer import AnalysisVisualizer
+from core.analysis_visualizer import AnalysisVisualizer
 
 # --- optional: metadata build & indexing scripts ---
 try:

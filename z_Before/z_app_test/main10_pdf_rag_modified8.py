@@ -51,11 +51,11 @@ from core.rag_ops import (
 from core.llm_ops import build_llm, build_sql_chain, generate_sql_from_nlq
 from core.plotting import df_to_table, plot_df_line
 from core.files_registry import upsert_entry, load_registry
-from core2.analysis_visualizer import AnalysisVisualizer
+from core.analysis_visualizer import AnalysisVisualizer
 
 # --- pdf_store: 모듈이 없으면 폴백 함수 정의 ---
 try:
-    from core2.pdf_store import (
+    from core.pdf_store import (
     ensure_pdf_tables, insert_pdf, insert_chunks,
     list_chunk_ids_by_doc, fetch_chunks_by_ids, delete_doc, keyword_search_chunks,
     list_all_docs,   # ← 추가
@@ -1982,7 +1982,8 @@ class MainWindow(QWidget):
 
     # ------------------------------------------------------------------
     # 전문가 코멘트 관리 메서드들
-    def load_expert_comments(self):
+    def load_
+    (self):
         """
         Load expert comments from the database and populate the expert comments tab.
         Each comment will be displayed with a delete (X) button.

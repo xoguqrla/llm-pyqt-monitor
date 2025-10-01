@@ -5,7 +5,7 @@ from sqlalchemy import inspect
 from core.db_ops import run_sql
 from core.llm_ops import generate_sql_from_nlq, rag_answer, chat_answer
 from core.rag_ops import retrieve_meta
-from core2.hybrid import fuse_sql_and_rag
+from core.hybrid import fuse_sql_and_rag
 
 def build_schema_hint(engine, max_tables: int = 8, max_cols: int = 8) -> str:
     insp = inspect(engine)

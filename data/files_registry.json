@@ -1,119 +1,47 @@
 {
-  "001_1_data.csv:c017c045fa": {
-    "file_id": "001_1_data.csv:c017c045fa",
-    "path": "C:\\Users\\KAMIC\\Desktop\\001_1_data.csv",
+  "20250224_Jisu_recorn_cont2_data.csv:eedcc34339": {
+    "file_id": "20250224_Jisu_recorn_cont2_data.csv:eedcc34339",
+    "path": "C:\\Users\\KAMIC^^\\Desktop\\20250224_Jisu_recorn_cont2_data.csv",
+    "sha256": "eedcc34339f371ddb26206affdba1d968ee410914b47de2e9baf9fd214c3a0f8",
+    "status": "indexed",
+    "rows": 10795,
+    "cols": 20,
+    "updated_at": 1759213481.09387
+  },
+  "20250224_Jisu_recorn_cont1_data.csv:c017c045fa": {
+    "file_id": "20250224_Jisu_recorn_cont1_data.csv:c017c045fa",
+    "path": "C:\\Users\\KAMIC^^\\Desktop\\20250224_Jisu_recorn_cont1_data.csv",
     "sha256": "c017c045faedd1c3d3a80fa543832416f97333081e7804f6802b82b79f258253",
     "status": "indexed",
     "rows": 15161,
-    "cols": 19,
-    "updated_at": 1756281536.4952872
+    "cols": 20,
+    "updated_at": 1759213480.3284829
   },
-  "002_1_data.csv:eedcc34339": {
-    "file_id": "002_1_data.csv:eedcc34339",
-    "path": "C:\\Users\\KAMIC\\Desktop\\002_1_data.csv",
-    "sha256": "eedcc34339f371ddb26206affdba1d968ee410914b47de2e9baf9fd214c3a0f8",
-    "status": "indexed",
-    "rows": 10795,
-    "cols": 19,
-    "updated_at": 1756348400.1845107
-  },
-  "003_1_data.csv:488dd63841": {
-    "file_id": "003_1_data.csv:488dd63841",
-    "path": "C:\\Users\\KAMIC\\Desktop\\003_1_data.csv",
+  "20250224_Jisu_recorn_cont3_data.csv:488dd63841": {
+    "file_id": "20250224_Jisu_recorn_cont3_data.csv:488dd63841",
+    "path": "C:\\Users\\KAMIC^^\\Desktop\\20250224_Jisu_recorn_cont3_data.csv",
     "sha256": "488dd63841aab43b20829a3165c71750b51e12618c28768d98b51a1a377ecd36",
     "status": "indexed",
     "rows": 1750,
-    "cols": 19,
-    "updated_at": 1755673845.7583926
+    "cols": 20,
+    "updated_at": 1759213481.2981246
   },
-  "004_1_data.csv:a79812a879": {
-    "file_id": "004_1_data.csv:a79812a879",
-    "path": "C:\\Users\\KAMIC\\Desktop\\004_1_data.csv",
+  "20250224_Jisu_recorn_cont4_data.csv:a79812a879": {
+    "file_id": "20250224_Jisu_recorn_cont4_data.csv:a79812a879",
+    "path": "C:\\Users\\KAMIC^^\\Desktop\\20250224_Jisu_recorn_cont4_data.csv",
     "sha256": "a79812a879fd2fe823eec816e00f3144074bafe32cbd2c526042ecbfbfd7f1b1",
     "status": "indexed",
     "rows": 7154,
-    "cols": 19,
-    "updated_at": 1755673846.9603345
+    "cols": 20,
+    "updated_at": 1759213481.8407495
   },
-  "005_1_data.csv:2916e93f1a": {
-    "file_id": "005_1_data.csv:2916e93f1a",
-    "path": "C:\\Users\\KAMIC\\Desktop\\005_1_data.csv",
+  "20250224_Jisu_recorn_cont5_data.csv:2916e93f1a": {
+    "file_id": "20250224_Jisu_recorn_cont5_data.csv:2916e93f1a",
+    "path": "C:\\Users\\KAMIC^^\\Desktop\\20250224_Jisu_recorn_cont5_data.csv",
     "sha256": "2916e93f1ae9b8bdecaf63ce7ece05703b41a3dcaaf4501d1641a7d95452a666",
     "status": "indexed",
     "rows": 499,
-    "cols": 19,
-    "updated_at": 1754284411.758355
-  },
-  "merged_data.csv:c4cb178442": {
-    "file_id": "merged_data.csv:c4cb178442",
-    "path": "C:\\Users\\KAMIC\\Desktop\\merged_data.csv",
-    "sha256": "c4cb17844225d0fd7d48417d93583d4b985ce7fc0bebd9dbd46777f7b142f86a",
-    "status": "indexed",
-    "rows": 2596,
-    "cols": 22,
-    "updated_at": 1755673851.6405299
-  },
-  "1_data.csv:2916e93f1a": {
-    "file_id": "1_data.csv:2916e93f1a",
-    "path": "C:\\Users\\KAMIC\\Desktop\\all_Jisu_recorn_cont\\20250224_Jisu_recorn_cont5\\1_data.csv",
-    "sha256": "2916e93f1ae9b8bdecaf63ce7ece05703b41a3dcaaf4501d1641a7d95452a666",
-    "status": "indexed",
-    "rows": 499,
-    "cols": 19,
-    "updated_at": 1755070966.837857
-  },
-  "KSS_85_System_variables_en.pdf:d9c7897b29": {
-    "file_id": "KSS_85_System_variables_en.pdf:d9c7897b29",
-    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 \uc790\ub8cc\\KSS_85_System_variables_en.pdf",
-    "sha256": "d9c7897b292c8d4565c3f899700af6fe1ed86288ec09b5c92520ef8f8731ffeb",
-    "status": "indexed",
-    "rows": 206,
-    "cols": 0,
-    "updated_at": 1755670075.188194
-  },
-  "KSS_86_END_ko.pdf:f4a8206112": {
-    "file_id": "KSS_86_END_ko.pdf:f4a8206112",
-    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 \uc790\ub8cc\\KSS_86_END_ko.pdf",
-    "sha256": "f4a820611283030a607eeb3344afad288270c9bf89997f2d088c963820c5fa0f",
-    "status": "indexed",
-    "rows": 362,
-    "cols": 0,
-    "updated_at": 1755667631.6811059
-  },
-  "MA_KR_C4_GI_ko.pdf:1231ff05b5": {
-    "file_id": "MA_KR_C4_GI_ko.pdf:1231ff05b5",
-    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 \uc790\ub8cc\\MA_KR_C4_GI_ko.pdf",
-    "sha256": "1231ff05b5683244bdd0da1d05b4b490092ebb4c51eb9b9502202d6e89f2d4a1",
-    "status": "indexed",
-    "rows": 145,
-    "cols": 0,
-    "updated_at": 1755667642.792953
-  },
-  "MA_KR_IONTEC_ko.pdf:c382467964": {
-    "file_id": "MA_KR_IONTEC_ko.pdf:c382467964",
-    "path": "C:\\Users\\KAMIC\\Desktop\\KUKA Training P1 \uc790\ub8cc\\MA_KR_IONTEC_ko.pdf",
-    "sha256": "c382467964007325c63d86d9c5d4e1bea09093aa002a0d8a88add9feb4b1a7c8",
-    "status": "indexed",
-    "rows": 330,
-    "cols": 0,
-    "updated_at": 1755669469.241832
-  },
-  "merged_data_total.csv:9ce882546b": {
-    "file_id": "merged_data_total.csv:9ce882546b",
-    "path": "C:\\Users\\KAMIC\\Desktop\\merged_data_total.csv",
-    "sha256": "9ce882546b97628d3c251602b6eb110df956acd2b463652e8ad18bbad1e79a3c",
-    "status": "indexed",
-    "rows": 39500,
-    "cols": 19,
-    "updated_at": 1756281569.915927
-  },
-  "1_data.csv:eedcc34339": {
-    "file_id": "1_data.csv:eedcc34339",
-    "path": "Z:\\KAMIC\\01.KAMIC_\uc7a5\ube44\\32. Laser-Wire DED\\21. \ubaa8\ub2c8\ud130\ub9c1\ub370\uc774\ud130\\DB\\20250224_Jisu_recorn_cont2(\uc644)\\1_data.csv",
-    "sha256": "eedcc34339f371ddb26206affdba1d968ee410914b47de2e9baf9fd214c3a0f8",
-    "status": "indexed",
-    "rows": 10795,
-    "cols": 19,
-    "updated_at": 1756381880.688506
+    "cols": 20,
+    "updated_at": 1759213481.9678636
   }
 }
