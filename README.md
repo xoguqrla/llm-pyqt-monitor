@@ -1,11 +1,11 @@
-# 🚀 LLM\_PyQt\_Platform
+#  LLM\_PyQt\_Platform
 
 **LLM\_PyQt\_Platform**은 **실시간 데이터 분석, 시각화, 그리고 LLM 기반 질의응답**을 통합한 차세대 분석 플랫폼입니다.
 PyQt 기반의 직관적인 GUI와 Python 생태계를 활용해 **데이터 업로드 → 저장 → 분석 → 시각화 → LLM 분석**까지 한 번에 처리할 수 있습니다.
 
 ---
 
-## 🌐 프로젝트 비전 (Vision)
+##  프로젝트 비전 (Vision)
 
 > **데이터 중심(Data-Driven) 의사결정**을 누구나 쉽게.
 >
@@ -21,7 +21,7 @@ PyQt 기반의 직관적인 GUI와 Python 생태계를 활용해 **데이터 업
 
 ---
 
-## 🏗 아키텍처 (Architecture 1 – 심플 뷰)
+##  아키텍처 (Architecture 1 – 심플 뷰)
 
 ```mermaid
 flowchart TD
@@ -47,7 +47,7 @@ flowchart TD
 
 ---
 
-## 🏗 아키텍처 (Architecture 2 – 상세 뷰)
+##  아키텍처 (Architecture 2 – 상세 뷰)
 
 ```mermaid
 flowchart TD
@@ -104,7 +104,7 @@ flowchart TD
 
 ---
 
-## ✨ 주요 기능 (Features)
+##  주요 기능 (Features)
 
 * **데이터 관리 (Data Management)**
 
@@ -132,7 +132,7 @@ flowchart TD
 
 ---
 
-## 📚 기술 스택 (Tech Stack)
+##  기술 스택 (Tech Stack)
 
 * **Frontend (GUI):** PyQt5, PyVista
 * **Backend:** Python 3.11
